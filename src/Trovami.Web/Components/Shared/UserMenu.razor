@@ -1,0 +1,59 @@
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div class="usermenu @(Up ? "usermenu-up" : "")">
+    <button type="button" class="usermenu-button" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open">
+        <span class="avatar">@Initial</span>
+        @if (!Compact)
+        {
+            <span class="usermenu-name">@Name</span>
+            <span class="usermenu-caret"><Icon Name="@(Up ? "up" : "down")" Size="16" /></span>
+        }
+    </button>
+    @if (_open)
+    {
+        <div class="menu-scrim" @onclick="() => _open = false"></div>
+        <div class="menu-list" @onclick="() => _open = false">
+            <div class="menu-note">@($"Signed in as {Name}")</div>
+            <a href="profile"><Icon Name="user" Size="16" /> Profile</a>
+            @if (IsAdmin)
+            {
+                <a href="admin/users"><Icon Name="users" Size="16" /> Users</a>
+                <a href="admin/settings"><Icon Name="sliders" Size="16" /> Admin settings</a>
+                <a href="admin/backups"><Icon Name="archive" Size="16" /> Backups</a>
+            }
+            <a href="release-notes"><Icon Name="file" Size="16" /> Release notes <span class="menu-version">@AppInfo.Version</span></a>
+            <hr />
+            <form action="account/logout" method="post">
+                <AntiforgeryToken />
+                <button type="submit"><Icon Name="logout" Size="16" /> Sign out</button>
+            </form>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public bool IsAdmin { get; set; }
+
+    // Avatar only (top bar on phones).
+    [Parameter] public bool Compact { get; set; }
+
+    // Opens upward (sidebar foot).
+    [Parameter] public bool Up { get; set; }
+
+    private bool _open;
+
+    private string Initial => string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpperInvariant();
+
+    protected override void OnInitialized() => Nav.LocationChanged += Close;
+
+    private void Close(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (!_open) return;
+        _open = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Nav.LocationChanged -= Close;
+}

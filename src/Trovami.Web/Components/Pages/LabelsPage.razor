@@ -1,0 +1,109 @@
+@page "/labels"
+@inherits AppPage
+@inject LocationService Locations
+
+<PageTitle>QR labels · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>QR labels</h1>
+        <p class="page-sub">Pick the locations to label, print the sheet, cut the labels out and stick them on. Scanning one with the phone app adds items right there.</p>
+    </div>
+</div>
+
+@if (_tree.Count == 0)
+{
+    <div class="empty">
+        <Icon Name="qr" Size="32" />
+        <p>Add some locations first.</p>
+    </div>
+}
+else
+{
+    <div class="bulk-bar active labels-bar">
+        <span>@(_selected.Count == 0 ? "Nothing selected" : Format.Count(_selected.Count, "label", "labels"))</span>
+        <div class="segmented" role="radiogroup" aria-label="Label size">
+            <button type="button" class="@(_size == "s" ? "on" : "")" @onclick="@(() => _size = "s")">Small</button>
+            <button type="button" class="@(_size == "m" ? "on" : "")" @onclick="@(() => _size = "m")">Medium</button>
+            <button type="button" class="@(_size == "l" ? "on" : "")" @onclick="@(() => _size = "l")">Large</button>
+        </div>
+        <a class="btn btn-primary @(_selected.Count == 0 ? "disabled" : "")" href="@PrintUrl" target="_blank" aria-disabled="@(_selected.Count == 0 ? "true" : "false")"><Icon Name="print" Size="16" /> Print sheet</a>
+        @if (_selected.Count > 0)
+        {
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="_selected.Clear">Clear</button>
+        }
+    </div>
+    <p class="muted small">A location that already has a QR label gets the same code again, so labels printed before keep working.</p>
+
+    <ul class="tree tree-select">
+        @foreach (var node in _tree.ChildrenOf(null))
+        {
+            @RenderNode(node)
+        }
+    </ul>
+}
+
+@code {
+    // ?select=<id>: comes from a location's "Print a QR label".
+    [SupplyParameterFromQuery(Name = "select")] public Guid? Select { get; set; }
+
+    private LocationTree _tree = new([]);
+    private readonly HashSet<Guid> _selected = [];
+    private string _size = "m";
+
+    private string PrintUrl => _selected.Count == 0 ? "labels" : $"labels/print?size={_size}&ids={string.Join(',', _selected)}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReloadOnHouseholdChange(LoadAsync);
+        await LoadAsync();
+        if (Select is { } id && _tree.Contains(id))
+            _selected.Add(id);
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Household is null) return;
+        _tree = await Locations.TreeAsync(await UserIdAsync(), Household.Id, PageToken);
+        _selected.IntersectWith(_tree.All.Select(n => n.Id));
+    }
+
+    private RenderFragment RenderNode(LocationNode node) => __builder =>
+    {
+        var children = _tree.ChildrenOf(node.Id).ToList();
+        <li>
+            <div class="tree-row">
+                <label class="check">
+                    <input type="checkbox" checked="@_selected.Contains(node.Id)" @onchange="e => Toggle(node.Id, e.Value is true)" />
+                    <span class="loc-icon"><Icon Name="@Format.KindIcon(node.Kind)" Size="16" /></span>
+                    @node.Name
+                    @if (node.Label is not null) {<span class="label-chip">@node.Label</span>}
+                </label>
+                @if (children.Count > 0)
+                {
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SelectInside(node.Id)">Select all inside</button>
+                }
+            </div>
+            @if (children.Count > 0)
+            {
+                <ul>
+                    @foreach (var child in children)
+                    {
+                        @RenderNode(child)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    private void Toggle(Guid id, bool on)
+    {
+        if (on) _selected.Add(id); else _selected.Remove(id);
+    }
+
+    private void SelectInside(Guid id)
+    {
+        foreach (var n in _tree.Subtree(id).Where(n => n.Id != id))
+            _selected.Add(n.Id);
+    }
+}

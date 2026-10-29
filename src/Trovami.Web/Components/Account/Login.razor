@@ -1,0 +1,100 @@
+@page "/account/login"
+@attribute [AllowAnonymous]
+@inject SignInManager<AppUser> SignInManager
+@inject UserManager<AppUser> UserManager
+@inject NavigationManager Nav
+@inject UserActivityService Activity
+@inject AccountRequestService Requests
+@inject AccountMailService Mail
+
+<PageTitle>Sign in · @AppInfo.Name</PageTitle>
+
+<div class="auth-form">
+    <h1>Sign in</h1>
+    <p class="page-sub">Sign in with your email address and password.</p>
+
+    @if (_error is not null)
+    {
+        <div class="notice notice-error">@_error</div>
+    }
+
+    <EditForm Model="Input" method="post" OnSubmit="SignInAsync" FormName="login" class="form">
+        <label class="field">
+            <span>Email address</span>
+            <InputText @bind-Value="Input!.Login" class="input" type="email" autocomplete="username" autofocus />
+        </label>
+        <label class="field">
+            <span>Password</span>
+            <InputText type="password" @bind-Value="Input!.Password" class="input" autocomplete="current-password" />
+        </label>
+        <label class="check">
+            <InputCheckbox @bind-Value="Input!.RememberMe" />
+            Keep me signed in on this device
+        </label>
+        <button type="submit" class="btn btn-primary btn-lg">Sign in</button>
+    </EditForm>
+    <div class="auth-links">
+        <a href="account/forgot">Forgot password?</a>
+        @if (_requestsOpen)
+        {
+            <span>No account yet? <a href="account/request">Request an account</a></span>
+        }
+    </div>
+</div>
+
+@code {
+    private string? _error;
+    private bool _requestsOpen;
+
+    [SupplyParameterFromForm]
+    private LoginInput? Input { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        // No users yet: the first person to arrive sets up the admin.
+        if (!UserManager.Users.Any())
+        {
+            Nav.NavigateTo("account/setup");
+            return;
+        }
+        _requestsOpen = await Requests.IsOpenAsync() && await Mail.EmailConfiguredAsync();
+    }
+
+    private async Task SignInAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Input!.Login) || string.IsNullOrEmpty(Input!.Password))
+        {
+            _error = "Enter your email address and password.";
+            return;
+        }
+        var user = await UserAdminService.FindByLoginAsync(UserManager, Input!.Login);
+        var result = user is null
+            ? Microsoft.AspNetCore.Identity.SignInResult.Failed
+            : await SignInManager.PasswordSignInAsync(user, Input!.Password, Input!.RememberMe, lockoutOnFailure: true);
+        if (result.Succeeded)
+        {
+            await Activity.RecordLoginAsync(user!.Id);
+            Nav.NavigateTo(SafeReturnUrl(ReturnUrl), forceLoad: true);
+            return;
+        }
+
+        _error = result.IsLockedOut
+            ? "This account is locked for a few minutes after too many failed attempts. Try again later."
+            : "That email and password don't match. Check both and try again.";
+    }
+
+    // Only same-site paths, so the login page can't be used to bounce people to another site.
+    private static string SafeReturnUrl(string? url) =>
+        !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") && !url.StartsWith("/\\") ? url : "/";
+
+    private sealed class LoginInput
+    {
+        public string Login { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool RememberMe { get; set; } = true;
+    }
+}

@@ -1,0 +1,97 @@
+@page "/account/request"
+@attribute [AllowAnonymous]
+@inject AccountRequestService Requests
+@inject AccountMailService Mail
+@inject RequestLimiter Limiter
+@inject NavigationManager Nav
+
+<PageTitle>Request an account · @AppInfo.Name</PageTitle>
+
+<div class="auth-form">
+    <p class="crumbs"><a href="account/login"><Icon Name="left" Size="14" /> Back to sign in</a></p>
+    <h1>Request an account</h1>
+
+    @if (!_open)
+    {
+        <p class="page-sub">This server doesn't take account requests. Ask the administrator for an invite.</p>
+    }
+    else if (_sent)
+    {
+        <div class="notice notice-good" role="status">Thanks! You'll get an email once the administrator has looked at your request.</div>
+    }
+    else
+    {
+        <p class="page-sub">The administrator approves each account. Once approved, you get an email with a link to choose your password.</p>
+
+        <EditForm Model="Input" method="post" OnSubmit="SendAsync" FormName="request-account" class="form">
+            <label class="field">
+                <span>Email address</span>
+                <InputText @bind-Value="Input!.Email" type="email" class="input" autocomplete="email" autofocus />
+                <span class="field-hint">You'll sign in with this.</span>
+            </label>
+            <label class="field">
+                <span>Name</span>
+                <InputText @bind-Value="Input!.Name" class="input" autocomplete="name" maxlength="@AppUser.MaxDisplayNameLength" />
+            </label>
+            <label class="field">
+                <span>About you <span class="muted">(optional)</span></span>
+                <InputTextArea @bind-Value="Input!.Message" class="textarea" rows="4" maxlength="@AccountRequest.MaxMessageLength" />
+                <span class="field-hint">@($"Tell the administrator who you are and why you'd like to use {AppInfo.Name}.")</span>
+            </label>
+            @* A field people never see; only bots fill it in. *@
+            <div class="visually-hidden" aria-hidden="true">
+                <label>Website <InputText @bind-Value="Input!.Website" tabindex="-1" autocomplete="off" /></label>
+            </div>
+            @if (_error is not null)
+            {
+                <div class="field-error">@_error</div>
+            }
+            <button type="submit" class="btn btn-primary btn-lg">Send request</button>
+        </EditForm>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+
+    private bool _open;
+    private bool _sent;
+    private string? _error;
+
+    [SupplyParameterFromForm]
+    private RequestInput? Input { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        _open = await Requests.IsOpenAsync() && await Mail.EmailConfiguredAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        // Bots and floods get the same answer as everyone else, just without anything stored.
+        if (!string.IsNullOrEmpty(Input!.Website) || !Limiter.TryAcquire(Http?.Connection.RemoteIpAddress?.ToString()))
+        {
+            _sent = true;
+            return;
+        }
+        try
+        {
+            if (await Requests.SubmitAsync(Input.Email ?? "", Input.Name ?? "", Input.Message) is { } stored)
+                await Mail.NotifyAccountRequestAsync(stored, Nav.BaseUri);
+            _sent = true;
+        }
+        catch (InputException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private sealed class RequestInput
+    {
+        public string? Email { get; set; } = "";
+        public string? Name { get; set; } = "";
+        public string? Message { get; set; }
+        public string? Website { get; set; }
+    }
+}

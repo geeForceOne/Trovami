@@ -1,0 +1,216 @@
+@page "/"
+@inherits AppPage
+@inject HouseholdService Households
+@inject LocationService Locations
+
+<PageTitle>Locations · @AppInfo.Name</PageTitle>
+
+@if (!_loaded)
+{
+    <p class="page-loading">…</p>
+}
+else if (Household is null)
+{
+    <div class="welcome">
+        <BrandMark Size="72" PlayOnLoad="true" />
+        <h1>@($"Welcome to {AppInfo.Name}")</h1>
+        <p class="page-sub">Everything you store belongs to a household: your home, a cellar, a holiday flat. Start with one; you can invite others into it later.</p>
+        <form class="inline-add" @onsubmit="CreateHouseholdAsync" @onsubmit:preventDefault="true">
+            <input class="input input-lg" @bind="_householdName" @bind:event="oninput" placeholder="Name, e.g. Home" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
+            <button type="submit" class="btn btn-primary btn-lg" disabled="@(Busy || string.IsNullOrWhiteSpace(_householdName))">Create household</button>
+        </form>
+        @if (Ui.Invites.Count > 0)
+        {
+            <p class="muted">Or accept an invite above.</p>
+        }
+    </div>
+}
+else
+{
+    <div class="page-head">
+        <div>
+            <h1>Locations</h1>
+            <p class="page-sub">@(_tree.Count == 0 ? $"Where things are stored in {Household.Name}." : $"{Format.Count(_tree.Count, "location", "locations")} and {Format.Count(_tree.All.Sum(n => n.Items), "item", "items")} in {Household.Name}.")</p>
+        </div>
+        @if (_tree.Count > 0)
+        {
+            <div class="page-actions">
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="ToggleAll">@(_expanded.Count > 0 ? "Collapse all" : "Expand all")</button>
+            </div>
+        }
+    </div>
+
+    @if (Ui.InboxCount > 0)
+    {
+        <a class="inbox-strip" href="inbox">
+            <Icon Name="inbox" />
+            <span>@($"{Format.Count(Ui.InboxCount, "item waits", "items wait")} in the Inbox for a location.")</span>
+            <Icon Name="right" Size="16" />
+        </a>
+    }
+
+    @if (_tree.Count == 0)
+    {
+        <div class="empty">
+            <Icon Name="house" Size="32" />
+            <p>Start with the place itself, like "House" or "Apartment". Rooms, closets and boxes go inside it.</p>
+        </div>
+    }
+    else
+    {
+        <ul class="tree" role="tree">
+            @foreach (var node in _tree.ChildrenOf(null))
+            {
+                @RenderNode(node, 0)
+            }
+        </ul>
+    }
+
+    <form class="inline-add tree-add" @onsubmit="() => AddAsync(null)" @onsubmit:preventDefault="true">
+        <KindSelect @bind-Value="_newKind[Guid.Empty]" />
+        <input class="input" @bind="_newName[Guid.Empty]" @bind:event="oninput" placeholder="@(_tree.Count == 0 ? "House" : "Add a top-level location")" maxlength="@Location.MaxNameLength" aria-label="New location name" />
+        <button type="submit" class="btn btn-secondary" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName.GetValueOrDefault(Guid.Empty)))"><Icon Name="plus" Size="16" /> Add</button>
+    </form>
+}
+
+@code {
+    private bool _loaded;
+    private string _householdName = "Home";
+    private LocationTree _tree = new([]);
+    private readonly HashSet<Guid> _expanded = [];
+    private Guid? _addingUnder;
+    private readonly Dictionary<Guid, string> _newName = new() { [Guid.Empty] = "" };
+    private readonly Dictionary<Guid, LocationKind> _newKind = new() { [Guid.Empty] = LocationKind.House };
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReloadOnHouseholdChange(LoadAsync);
+        await LoadAsync();
+        // The first two levels open, so the rooms show right away.
+        foreach (var top in _tree.ChildrenOf(null))
+            _expanded.Add(top.Id);
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _tree = Household is { } h ? await Locations.TreeAsync(await UserIdAsync(), h.Id, PageToken) : new([]);
+        _newKind[Guid.Empty] = _tree.Count == 0 ? LocationKind.House : LocationKind.Room;
+    }
+
+    private RenderFragment RenderNode(LocationNode node, int depth) => __builder =>
+    {
+        var children = _tree.ChildrenOf(node.Id).ToList();
+        var open = _expanded.Contains(node.Id);
+        var below = _tree.ItemsBelow(node.Id);
+        <li role="treeitem" aria-expanded="@(children.Count > 0 ? (open ? "true" : "false") : null)">
+            <div class="tree-row" style="@Format.ColorVar(node.Color)">
+                @if (children.Count > 0)
+                {
+                    <button type="button" class="tree-toggle" aria-label="@(open ? "Collapse" : "Expand")" @onclick="() => Toggle(node.Id)">
+                        <Icon Name="@(open ? "down" : "right")" Size="14" />
+                    </button>
+                }
+                else
+                {
+                    <span class="tree-toggle"></span>
+                }
+                <a class="tree-link" href="@($"l/{node.Id}")">
+                    <span class="loc-icon @(node.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(node.Kind)" Size="18" /></span>
+                    <span class="tree-name">@node.Name</span>
+                    @if (node.Label is not null)
+                    {
+                        <span class="label-chip">@node.Label</span>
+                    }
+                    @if (node.Tags > 0)
+                    {
+                        <span class="tree-tag" title="@Format.Count(node.Tags, "tag", "tags")"><Icon Name="tag" Size="14" /></span>
+                    }
+                </a>
+                <span class="tree-count">@(below > 0 ? Format.Number(below) : "")</span>
+                <button type="button" class="btn btn-ghost btn-icon btn-sm tree-plus" title="@($"Add a location inside {node.Name}")" aria-label="@($"Add inside {node.Name}")"
+                        @onclick="() => StartAdd(node)">
+                    <Icon Name="plus" Size="16" />
+                </button>
+            </div>
+            @if ((open && children.Count > 0) || _addingUnder == node.Id)
+            {
+                <ul role="group">
+                    @if (open)
+                    {
+                        @foreach (var child in children)
+                        {
+                            @RenderNode(child, depth + 1)
+                        }
+                    }
+                    @if (_addingUnder == node.Id)
+                    {
+                        <li>
+                            <form class="inline-add tree-inline" @onsubmit="() => AddAsync(node.Id)" @onsubmit:preventDefault="true">
+                                <KindSelect @bind-Value="_newKind[node.Id]" />
+                                <input class="input" @bind="_newName[node.Id]" @bind:event="oninput" placeholder="@($"Inside {node.Name}")"
+                                       maxlength="@Location.MaxNameLength" aria-label="New location name" autofocus @onkeydown="CancelOnEscape" />
+                                <button type="submit" class="btn btn-primary btn-sm" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName.GetValueOrDefault(node.Id)))">Add</button>
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _addingUnder = null">Cancel</button>
+                            </form>
+                        </li>
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    private void CancelOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            _addingUnder = null;
+    }
+
+    private void Toggle(Guid id)
+    {
+        if (!_expanded.Remove(id))
+            _expanded.Add(id);
+    }
+
+    private void ToggleAll()
+    {
+        if (_expanded.Count > 0)
+            _expanded.Clear();
+        else
+            foreach (var n in _tree.All.Where(n => _tree.ChildrenOf(n.Id).Any()))
+                _expanded.Add(n.Id);
+    }
+
+    private void StartAdd(LocationNode parent)
+    {
+        _addingUnder = parent.Id;
+        _newName[parent.Id] = "";
+        _newKind[parent.Id] = KindSelect.ChildKind(parent.Kind);
+        _expanded.Add(parent.Id);
+    }
+
+    private async Task AddAsync(Guid? parentId)
+    {
+        var key = parentId ?? Guid.Empty;
+        if (Household is null || string.IsNullOrWhiteSpace(_newName.GetValueOrDefault(key)))
+            return;
+        await RunAsync(async () =>
+        {
+            await Locations.CreateAsync(await UserIdAsync(), Household.Id, parentId, _newName[key], _newKind[key], ct: PageToken);
+            _newName[key] = "";
+            await LoadAsync();
+            // Keep the form open under a parent, for adding several in a row.
+            if (parentId is null)
+                _newKind[Guid.Empty] = LocationKind.Room;
+        });
+    }
+
+    private async Task CreateHouseholdAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Households.CreateAsync(await UserIdAsync(), _householdName, PageToken);
+            await Ui.RefreshAsync();
+        });
+    }
+}

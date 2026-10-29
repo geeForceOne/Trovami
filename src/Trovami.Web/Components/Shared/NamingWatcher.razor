@@ -1,0 +1,46 @@
+@implements IDisposable
+
+@* While items wait for the AI, asks the page to reload every few seconds so the names appear. *@
+
+@code {
+    [Parameter] public bool Active { get; set; }
+    // An EventCallback, so the page re-renders after each reload.
+    [Parameter] public EventCallback OnTick { get; set; }
+
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(3);
+    private const int MaxTicks = 40;
+    private CancellationTokenSource? _cts;
+
+    protected override void OnParametersSet()
+    {
+        if (Active && _cts is null)
+            _ = RunAsync(_cts = new CancellationTokenSource());
+        else if (!Active)
+            Stop();
+    }
+
+    // Gives up after a couple of minutes; the names are there on the next visit anyway.
+    private async Task RunAsync(CancellationTokenSource cts)
+    {
+        using var timer = new PeriodicTimer(Interval);
+        try
+        {
+            for (var i = 0; i < MaxTicks && await timer.WaitForNextTickAsync(cts.Token); i++)
+            {
+                await InvokeAsync(() => OnTick.InvokeAsync());
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void Stop()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+
+    public void Dispose() => Stop();
+}

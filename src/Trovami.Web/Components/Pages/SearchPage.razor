@@ -1,0 +1,87 @@
+@page "/search"
+@inherits AppPage
+@inject ItemService Items
+
+<PageTitle>@(string.IsNullOrWhiteSpace(Q) ? "Search" : $"{Q} · Search") · @AppInfo.Name</PageTitle>
+
+@if (_result is not null)
+{
+    var total = _result.Items.Count + _result.Locations.Count;
+    <div class="page-head">
+        <div>
+            <h1>@(total == 0 ? "Nothing found" : $"Found {Format.Count(total, "match", "matches")}")</h1>
+            <p class="page-sub">@(total == 0 ? $"Nothing in {Household?.Name} matches \"{Q}\". Try fewer or other words." : $"For \"{Q}\" in {Household?.Name}.")</p>
+        </div>
+    </div>
+
+    @if (_result.Locations.Count > 0)
+    {
+        <section class="section">
+            <h2>Locations</h2>
+            <ul class="hit-list">
+                @foreach (var loc in _result.Locations)
+                {
+                    <li>
+                        <a class="hit" href="@($"l/{loc.Id}")" style="@Format.ColorVar(loc.Color)">
+                            <span class="loc-icon @(loc.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(loc.Kind)" Size="18" /></span>
+                            <span class="hit-text">
+                                <span class="hit-name">@loc.Name @if (loc.Label is not null) {<span class="label-chip">@loc.Label</span>}</span>
+                                <span class="hit-path">@(loc.ParentId is null ? "Top level" : _result.Tree.PathOf(loc.ParentId))</span>
+                            </span>
+                        </a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (_result.Items.Count > 0)
+    {
+        <section class="section">
+            <h2>Items</h2>
+            <ul class="hit-list">
+                @foreach (var item in _result.Items)
+                {
+                    <li>
+                        <a class="hit" href="@($"i/{item.Id}")">
+                            <span class="hit-photo">
+                                @if (item.PhotoVersion is { } v)
+                                {
+                                    <img src="@Format.ItemPhoto(item.Id, v)" alt="" loading="lazy" />
+                                }
+                                else
+                                {
+                                    <Icon Name="image" Size="20" />
+                                }
+                            </span>
+                            <span class="hit-text">
+                                <span class="hit-name">@item.ShownName @if (item.Quantity > 1) {<span class="muted">× @Format.Number(item.Quantity)</span>}</span>
+                                <span class="hit-path"><Icon Name="@(item.LocationId is null ? "inbox" : "pin")" Size="14" /> @item.Path</span>
+                            </span>
+                        </a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery] public string? Q { get; set; }
+
+    private SearchResult? _result;
+
+    protected override void OnInitialized() => ReloadOnHouseholdChange(LoadAsync);
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (Household is null || string.IsNullOrWhiteSpace(Q))
+        {
+            _result = null;
+            return;
+        }
+        _result = await Items.SearchAsync(await UserIdAsync(), Household.Id, Q, PageToken);
+    }
+}

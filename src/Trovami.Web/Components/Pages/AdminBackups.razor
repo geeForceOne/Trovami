@@ -1,0 +1,308 @@
+@page "/admin/backups"
+@attribute [Authorize(Roles = Roles.Admin)]
+@using Trovami.Core.Backup
+@inherits AppPage
+@inject BackupService Backups
+@inject SettingsService Settings
+@inject IHostApplicationLifetime Lifetime
+@inject IJSRuntime JS
+@inject ILogger<AdminBackups> Log
+
+<PageTitle>Backups · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Backups</h1>
+        <p class="page-sub">A backup holds everything: all users, households, locations, items and their photos, settings, and the keys that unlock the saved mail password and AI keys. Keep downloaded backups somewhere safe.</p>
+    </div>
+</div>
+
+@if (_restarting)
+{
+    <div class="notice notice-info notice-row" role="status">
+        <BrandMark Size="36" Busy="true" />
+        <span>@($"The backup is being restored and {AppInfo.Name} restarts. Reload this page in a minute.")</span>
+    </div>
+}
+else if (_settings is null)
+{
+    <p class="page-loading">…</p>
+}
+else
+{
+    <div class="settings">
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Download a backup</h2>
+                <p>A copy of the current state as a file. With a password, the file is encrypted (AES-256); without the password it can't be restored.</p>
+            </div>
+            <div class="setting-body">
+                @* A plain form post: the server builds the file and the browser downloads it, however large. *@
+                <form class="form" method="post" action="admin/backups/download" @onsubmit="AfterDownload">
+                    <AntiforgeryToken />
+                    <div class="field-row field-row-wrap">
+                        <label class="field field-grow">
+                            <span>Password <span class="muted">(optional)</span></span>
+                            <input class="input" type="password" name="password" @bind="_password" @bind:event="oninput" autocomplete="new-password" />
+                        </label>
+                        <label class="field field-grow">
+                            <span>Repeat password</span>
+                            <input class="input" type="password" @bind="_password2" @bind:event="oninput" autocomplete="new-password" disabled="@string.IsNullOrEmpty(_password)" />
+                        </label>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_password) && _password2.Length > 0 && _password != _password2)
+                    {
+                        <div class="field-error">The passwords don't match.</div>
+                    }
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary" disabled="@(Busy || (!string.IsNullOrEmpty(_password) && _password != _password2))">
+                            <Icon Name="download" Size="16" /> @(string.IsNullOrEmpty(_password) ? "Download backup" : "Download encrypted backup")
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Automatic backups</h2>
+                <p>One backup a day into the backups folder of the data volume. If the app wasn't running at that time, it's made when it's back.</p>
+                <p class="muted small">They're in the same volume as the data, so they don't help if the volume itself is lost. Download one now and then.</p>
+            </div>
+            <div class="setting-body">
+                <form class="form" @onsubmit="SaveSettingsAsync" @onsubmit:preventDefault="true">
+                    <label class="check">
+                        <input type="checkbox" @bind="_auto" /> Make a backup every day
+                    </label>
+                    <div class="field-row">
+                        <label class="field">
+                            <span>At</span>
+                            <TimeField @bind-Value="_time" Disabled="@(!_auto)" Label="At" />
+                        </label>
+                        <label class="field">
+                            <span>Keep the last</span>
+                            <input class="input input-short" type="number" min="1" max="@BackupService.MaxKeep" @bind="_keep" disabled="@(!_auto)" />
+                        </label>
+                    </div>
+                    <p class="field-hint">@($"Time zone: {(_timeZone.Replace('_', ' '))}.")
+                        @if (_settings.LastAutoBackupAt is { } last)
+                        {
+                            @(" " + $"Last automatic backup: {(Format.DateTime(last, _timeZone))}.")
+                        }
+                    </p>
+                    @if (_settings.LastAutoBackupError is { } error)
+                    {
+                        <div class="field-error">@($"The last automatic backup failed: {error}")</div>
+                    }
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
+                        <button type="button" class="btn btn-secondary" disabled="@Busy" @onclick="BackupNowAsync">Make a backup now</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Stored backups</h2>
+                <p>Automatic backups, and the safety backups made before each restore and each update.</p>
+            </div>
+            <div class="setting-body">
+                @if (_files.Count == 0)
+                {
+                    <p class="muted">No stored backups yet.</p>
+                }
+                else
+                {
+                    <div class="table-scroll">
+                        <table class="table backups-table">
+                            <tbody>
+                                @foreach (var f in _files)
+                                {
+                                    <tr @key="f.Name">
+                                        <td>
+                                            <div class="nowrap">@Format.DateTime(f.CreatedUtc, _timeZone)</div>
+                                            <div class="muted small">@(f.IsAutomatic ? "Automatic" : f.Name.StartsWith(BackupService.SafetyPrefix) ? "Before a restore" : f.Name.StartsWith(BackupService.UpdatePrefix) ? "Before an update" : "Manual") · @Format.Size(f.Size)</div>
+                                        </td>
+                                        <td class="actions-cell">
+                                            <div class="row-actions">
+                                            <a class="btn btn-ghost btn-sm" href="@($"admin/backups/file/{Uri.EscapeDataString(f.Name)}")" download="@f.Name"><Icon Name="download" Size="15" /> Download</a>
+                                            <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="() => CheckStoredAsync(f)"><Icon Name="restore" Size="15" /> Restore</button>
+                                            <button type="button" class="btn btn-ghost btn-sm btn-icon btn-danger-text" disabled="@Busy" aria-label="Delete" title="Delete" @onclick="() => DeleteFileAsync(f)"><Icon Name="trash" Size="15" /></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Restore</h2>
+                <p>@($"Replaces everything in {AppInfo.Name} with the backup: all users, accounts and settings. A safety backup of the current state is made first. Then the app restarts.")</p>
+            </div>
+            <div class="setting-body">
+                @if (_staged is null)
+                {
+                    <div class="form">
+                        <label class="file-drop">
+                            <Icon Name="upload" Size="22" />
+                            <span>@(_uploadName ?? "Choose a backup file (.zip or .zip.aes)")</span>
+                            <InputFile OnChange="PickFileAsync" accept=".zip,.aes" />
+                        </label>
+                        <label class="field">
+                            <span>Password <span class="muted">(for an encrypted backup)</span></span>
+                            <input class="input" type="password" @bind="_restorePassword" autocomplete="off" />
+                        </label>
+                        <div class="actions">
+                            <button type="button" class="btn btn-secondary" disabled="@(Busy || _upload is null)" @onclick="CheckUploadAsync">Check backup</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="notice notice-warn">
+                        <strong>Ready to restore</strong>
+                        <div>@($"Backup from {(Format.DateTime(_staged.CreatedUtc, _timeZone))}, made by version {_staged.AppVersion}: {Format.Count(_staged.Users, "user", "users")}, {Format.Count(_staged.Households, "household", "households")}, {Format.Count(_staged.Items, "item", "items")}, {Format.Count(_staged.Photos, "photo", "photos")}.")</div>
+                    </div>
+                    <div class="actions">
+                        <button type="button" class="btn btn-ghost" disabled="@Busy" @onclick="CancelRestore">Cancel</button>
+                        <button type="button" class="btn btn-danger" disabled="@Busy" @onclick="RestoreAsync"><Icon Name="restore" Size="16" /> Restore and restart</button>
+                    </div>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    // Photos make backups large; the upload streams to a file, never into memory.
+    private const long MaxUploadBytes = 8L * 1024 * 1024 * 1024;
+
+    private BackupSettingsView? _settings;
+    private IReadOnlyList<BackupFile> _files = [];
+    private string _timeZone = Regions.DefaultTimeZone;
+    private bool _auto;
+    private TimeOnly _time;
+    private int _keep;
+    private string _password = "";
+    private string _password2 = "";
+    private IBrowserFile? _upload;
+    private string? _uploadName;
+    private string? _restorePassword;
+    private BackupSummary? _staged;
+    private bool _restarting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _timeZone = (await Settings.GetAsync(await UserIdAsync(), PageToken)).TimeZone;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _settings = await Backups.GetSettingsAsync(PageToken);
+        _auto = _settings.AutoBackups;
+        _time = _settings.Time;
+        _keep = _settings.Keep;
+        _files = Backups.List();
+    }
+
+    // The download runs as a normal request; the page only clears the passwords. Not cleared right
+    // away, so the browser still posts them.
+    private async Task AfterDownload()
+    {
+        await Task.Delay(500);
+        _password = _password2 = "";
+        Ui.Toast.Info("The backup is being prepared; the download starts in a moment.");
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        if (await RunAsync(async () => { await Backups.SaveSettingsAsync(_auto, _time, _keep, _timeZone, PageToken); await LoadAsync(); }))
+            Ui.Toast.Success("Backup settings saved.");
+    }
+
+    private async Task BackupNowAsync()
+    {
+        if (await RunAsync(async () =>
+            {
+                await Backups.CreateStoredAsync("manual-", BackupService.MaxKeep, PageToken);
+                _files = Backups.List();
+            }))
+            Ui.Toast.Success("Backup made.");
+    }
+
+    private async Task DeleteFileAsync(BackupFile f)
+    {
+        if (!await Ui.Confirm.AskAsync("Delete this backup?", $"{Format.DateTime(f.CreatedUtc, _timeZone)} · {f.Name}", "Delete", danger: true))
+            return;
+        Backups.Delete(f.Name);
+        _files = Backups.List();
+    }
+
+    private Task PickFileAsync(InputFileChangeEventArgs e)
+    {
+        _upload = e.File;
+        _uploadName = e.File.Name;
+        return Task.CompletedTask;
+    }
+
+    private async Task CheckUploadAsync()
+    {
+        if (_upload is null) return;
+        await RunAsync(async () =>
+        {
+            if (_upload.Size > MaxUploadBytes)
+                throw new InputException($"The file is larger than {MaxUploadBytes / 1024 / 1024 / 1024} GB.");
+            var temp = Path.GetTempFileName();
+            try
+            {
+                await using (var file = File.Create(temp))
+                    await _upload.OpenReadStream(MaxUploadBytes, PageToken).CopyToAsync(file, PageToken);
+                _staged = await Backups.StageAsync(temp, _restorePassword, PageToken);
+            }
+            finally
+            {
+                File.Delete(temp);
+            }
+        });
+    }
+
+    private async Task CheckStoredAsync(BackupFile f)
+    {
+        await RunAsync(async () =>
+        {
+            var path = Backups.PathOf(f.Name) ?? throw new NotFoundException("That backup no longer exists.");
+            _staged = await Backups.StageAsync(path, null, PageToken);
+        });
+    }
+
+    private void CancelRestore()
+    {
+        Backups.DiscardStaged();
+        _staged = null;
+        _upload = null;
+        _uploadName = null;
+        _restorePassword = null;
+    }
+
+    private async Task RestoreAsync()
+    {
+        if (!await Ui.Confirm.AskAsync("Restore this backup?",
+                $"Everything in {AppInfo.Name} is replaced by the backup, for all users. Anyone using the app is disconnected while it restarts.",
+                "Restore and restart", danger: true))
+            return;
+        if (!await RunAsync(() => Backups.ScheduleRestoreAsync(PageToken)))
+            return;
+        _restarting = true;
+        StateHasChanged();
+        Log.LogWarning("Stopping the app to apply a restore");
+        // A moment for this page to show the notice; Docker's restart policy starts the app again.
+        _ = Task.Delay(TimeSpan.FromSeconds(2)).ContinueWith(_ => Lifetime.StopApplication());
+    }
+}

@@ -1,0 +1,45 @@
+
+@* A time of day in the person's region format (03:00, or 3:00 AM), as a text field: the
+   browser's own time field follows the browser's language instead. *@
+<input class="input input-short time-field @(_invalid ? "invalid" : "")" value="@_text" @oninput="OnInput" @onblur="OnBlur"
+       aria-label="@Label" aria-invalid="@(_invalid ? "true" : null)" disabled="@Disabled" autocomplete="off" spellcheck="false" />
+
+@code {
+    [Parameter] public TimeOnly Value { get; set; }
+    [Parameter] public EventCallback<TimeOnly> ValueChanged { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private string _text = "";
+    private bool _invalid;
+    private TimeOnly? _shown;
+
+    protected override void OnParametersSet()
+    {
+        if (Value != _shown)
+        {
+            _shown = Value;
+            _text = Value.ToString("t", System.Globalization.CultureInfo.CurrentCulture);
+            _invalid = false;
+        }
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? "";
+        if (DateInput.TryParseTime(_text, System.Globalization.CultureInfo.CurrentCulture, out var time))
+        {
+            _invalid = false;
+            _shown = time;
+            Value = time;
+            await ValueChanged.InvokeAsync(time);
+        }
+    }
+
+    private void OnBlur()
+    {
+        _invalid = !DateInput.TryParseTime(_text, System.Globalization.CultureInfo.CurrentCulture, out _);
+        if (!_invalid)
+            _text = Value.ToString("t", System.Globalization.CultureInfo.CurrentCulture);
+    }
+}

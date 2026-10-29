@@ -1,0 +1,325 @@
+@page "/l/{Id:guid}"
+@inherits AppPage
+@inject LocationService Locations
+@inject ItemService Items
+@inject TagService Tags
+
+<PageTitle>@(_node?.Name ?? "Location") · @AppInfo.Name</PageTitle>
+
+@if (_node is null)
+{
+    <p class="page-loading">@(_missing ? "This location no longer exists." : "…")</p>
+}
+else
+{
+    <nav class="crumbs path" aria-label="Path">
+        <a href="">Locations</a>
+        @foreach (var a in _tree.Ancestry(_node.Id).SkipLast(1))
+        {
+            <span class="path-sep">›</span>
+            <a href="@($"l/{a.Id}")">@a.Name</a>
+        }
+    </nav>
+
+    <div class="loc-head" style="@Format.ColorVar(_node.Color)">
+        @if (_node.PhotoVersion is { } pv)
+        {
+            <a class="loc-photo" href="@Format.LocationPhoto(_node.Id, pv, thumb: false)" target="_blank"><img src="@Format.LocationPhoto(_node.Id, pv)" alt="" /></a>
+        }
+        else
+        {
+            <span class="loc-icon loc-icon-lg @(_node.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(_node.Kind)" Size="28" /></span>
+        }
+        <div class="loc-title">
+            <h1>@_node.Name @if (_node.Label is not null) {<span class="label-chip label-chip-lg">@_node.Label</span>}</h1>
+            <p class="page-sub">
+                @Format.KindLabel(_node.Kind)
+                @if (_node.Color is not null) {<span>· @LocationColors.LabelOf(_node.Color)</span>}
+                · @Format.Count(_tree.ItemsBelow(_node.Id), "item", "items") inside
+            </p>
+        </div>
+        <div class="page-actions">
+            <button type="button" class="btn btn-secondary btn-sm" aria-expanded="@(_editing ? "true" : "false")" @onclick="StartEdit"><Icon Name="edit" Size="16" /> Edit</button>
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _moving = !_moving"><Icon Name="move" Size="16" /> Move</button>
+            <button type="button" class="btn btn-ghost btn-sm btn-danger-text" @onclick="DeleteAsync"><Icon Name="trash" Size="16" /> Delete</button>
+        </div>
+    </div>
+
+    @if (_moving)
+    {
+        <div class="inline-panel">
+            <span>@($"Move {_node.Name} and everything in it to:")</span>
+            <LocationPicker Tree="_tree" Exclude="_node.Id" Current="_node.ParentId" AutoFocus="true" Placeholder="Pick a location…" OnPick="MoveAsync" />
+            @if (_node.ParentId is not null)
+            {
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => MoveAsync(null)">To the top level</button>
+            }
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _moving = false">Cancel</button>
+        </div>
+    }
+
+    @if (_editing)
+    {
+        <form class="inline-panel loc-edit" @onsubmit="SaveAsync" @onsubmit:preventDefault="true">
+            <div class="field-row field-row-wrap">
+                <label class="field field-grow">
+                    <span>Name</span>
+                    <input class="input" @bind="_edit.Name" @bind:event="oninput" maxlength="@Location.MaxNameLength" />
+                </label>
+                <label class="field">
+                    <span>Kind</span>
+                    <KindSelect @bind-Value="_edit.Kind" />
+                </label>
+                <label class="field">
+                    <span>Label <span class="muted">(what's written on it)</span></span>
+                    <input class="input input-short input-code" @bind="_edit.Label" @bind:event="oninput" maxlength="@Location.MaxLabelLength" placeholder="B12" />
+                </label>
+            </div>
+            <div class="field">
+                <span>Color</span>
+                <div class="swatches" role="radiogroup" aria-label="Color">
+                    <button type="button" class="swatch swatch-none @(_edit.Color is null ? "on" : "")" role="radio" aria-checked="@(_edit.Color is null ? "true" : "false")" title="No color" @onclick="() => _edit.Color = null"><Icon Name="x" Size="14" /></button>
+                    @foreach (var (key, label) in LocationColors.All)
+                    {
+                        <button type="button" class="swatch @(_edit.Color == key ? "on" : "")" style="--loc:var(--c-@key)" role="radio" aria-checked="@(_edit.Color == key ? "true" : "false")" title="@label" aria-label="@label" @onclick="() => _edit.Color = key"></button>
+                    }
+                </div>
+            </div>
+            <label class="field">
+                <span>Notes <span class="muted">(an address, opening times, what's special)</span></span>
+                <textarea class="textarea" rows="3" @bind="_edit.Notes" @bind:event="oninput" maxlength="@Location.MaxNotesLength"></textarea>
+            </label>
+            <div class="field">
+                <span>Photo</span>
+                <div class="actions">
+                    <PhotoButton Label="@(_node.PhotoVersion is null ? "Add photo" : "Replace photo")" OnPhoto="SetPhotoAsync" Disabled="Busy" />
+                    @if (_node.PhotoVersion is not null)
+                    {
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="RemovePhotoAsync">Remove photo</button>
+                    }
+                </div>
+            </div>
+            <div class="actions">
+                <button type="submit" class="btn btn-primary" disabled="@(Busy || string.IsNullOrWhiteSpace(_edit.Name))">Save</button>
+                <button type="button" class="btn btn-ghost" @onclick="() => _editing = false">Cancel</button>
+            </div>
+        </form>
+    }
+    else if (_node.Notes is not null)
+    {
+        <p class="loc-notes">@_node.Notes</p>
+    }
+
+    @* Sub-locations *@
+    <section class="section">
+        <div class="section-head">
+            <h2>Inside @_node.Name</h2>
+        </div>
+        <div class="loc-children">
+            @foreach (var child in _tree.ChildrenOf(_node.Id))
+            {
+                <a class="loc-card" href="@($"l/{child.Id}")" style="@Format.ColorVar(child.Color)">
+                    <span class="loc-icon @(child.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(child.Kind)" Size="18" /></span>
+                    <span class="loc-card-name">@child.Name</span>
+                    @if (child.Label is not null)
+                    {
+                        <span class="label-chip">@child.Label</span>
+                    }
+                    <span class="loc-card-count">@(_tree.ItemsBelow(child.Id) is > 0 and var n ? Format.Number(n) : "")</span>
+                </a>
+            }
+            <form class="inline-add loc-add" @onsubmit="AddLocationAsync" @onsubmit:preventDefault="true">
+                <KindSelect @bind-Value="_newKind" />
+                <input class="input" @bind="_newName" @bind:event="oninput" placeholder="Add a location inside" maxlength="@Location.MaxNameLength" aria-label="New location name" />
+                <button type="submit" class="btn btn-secondary btn-sm" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName))"><Icon Name="plus" Size="16" /> Add</button>
+            </form>
+        </div>
+    </section>
+
+    @* Items *@
+    <section class="section">
+        <div class="section-head">
+            <h2>Items <span class="count">@(_items.Count > 0 ? Format.Number(_items.Count) : "")</span></h2>
+        </div>
+        <ItemAdd LocationId="_node.Id" OnAdded="LoadAsync" />
+        <NamingWatcher Active="_items.Any(i => i.Naming)" OnTick="LoadAsync" />
+        @if (_items.Count > 0)
+        {
+            <div class="item-grid">
+                @foreach (var item in _items)
+                {
+                    <ItemCard Item="item" />
+                }
+            </div>
+        }
+        else
+        {
+            <p class="muted">Nothing here yet. Add items above, or scan this location's tag with the phone app.</p>
+        }
+    </section>
+
+    @* Tags *@
+    <section class="section">
+        <div class="section-head">
+            <h2>Tags</h2>
+            <a class="btn btn-ghost btn-sm" href="@($"labels?select={_node.Id}")"><Icon Name="qr" Size="16" /> Print a QR label</a>
+        </div>
+        @if (_tags.Count == 0)
+        {
+            <p class="muted">No tag yet. Stick an NFC tag on it and link it with the phone app, or print a QR label.</p>
+        }
+        else
+        {
+            <ul class="tag-list">
+                @foreach (var tag in _tags)
+                {
+                    <li>
+                        <Icon Name="@(tag.Kind == TagKind.Nfc ? "nfc" : "qr")" Size="16" />
+                        <span>@(tag.Kind == TagKind.Nfc ? "NFC tag" : "QR label")</span>
+                        <code class="code">@tag.Code</code>
+                        <span class="muted small">@Format.Ago(tag.CreatedAt)</span>
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => UnlinkAsync(tag)">Unlink</button>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private LocationTree _tree = new([]);
+    private LocationNode? _node;
+    private bool _missing;
+    private IReadOnlyList<ItemView> _items = [];
+    private IReadOnlyList<TagView> _tags = [];
+    private bool _editing;
+    private bool _moving;
+    private EditModel _edit = new();
+    private string _newName = "";
+    private LocationKind _newKind = LocationKind.Box;
+
+    private sealed class EditModel
+    {
+        public string Name { get; set; } = "";
+        public LocationKind Kind { get; set; }
+        public string? Label { get; set; }
+        public string? Color { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    protected override void OnInitialized() => ReloadOnHouseholdChange(LoadAsync);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _editing = _moving = false;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Household is null)
+            return;
+        var userId = await UserIdAsync();
+        _tree = await Locations.TreeAsync(userId, Household.Id, PageToken);
+        _node = _tree.Find(Id);
+        _missing = _node is null;
+        if (_node is null)
+            return;
+        _newKind = KindSelect.ChildKind(_node.Kind);
+        _items = await Items.AtLocationAsync(userId, Household.Id, Id, PageToken);
+        _tags = await Tags.ForLocationAsync(userId, Id, PageToken);
+    }
+
+    private void StartEdit()
+    {
+        if (_node is null) return;
+        _editing = !_editing;
+        _edit = new EditModel { Name = _node.Name, Kind = _node.Kind, Label = _node.Label, Color = _node.Color, Notes = _node.Notes };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (await RunAsync(async () =>
+        {
+            await Locations.UpdateAsync(await UserIdAsync(), Id, new LocationUpdate(_edit.Name, _edit.Kind, _edit.Notes, _edit.Color, _edit.Label), PageToken);
+            await LoadAsync();
+        }))
+            _editing = false;
+    }
+
+    private async Task MoveAsync(Guid? parentId)
+    {
+        if (await RunAsync(async () =>
+        {
+            await Locations.MoveAsync(await UserIdAsync(), Id, parentId, PageToken);
+            await LoadAsync();
+        }))
+        {
+            _moving = false;
+            Ui.Toast.Success($"Moved to {_tree.PathOf(parentId) switch { "Inbox" => "the top level", var p => p }}.");
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_node is null) return;
+        var children = _tree.ChildrenOf(Id).Count();
+        var empty = children == 0 && _items.Count == 0;
+        var up = _node.ParentId is null ? "the top level (items go to the Inbox)" : _tree.PathOf(_node.ParentId);
+        var ok = await Ui.Confirm.AskAsync($"Delete {_node.Name}?",
+            empty ? "It's empty, so nothing else changes." + (_tags.Count > 0 ? " Its tags are unlinked." : "")
+                  : $"What's in it ({Format.Count(children, "location", "locations")}, {Format.Count(_items.Count, "item", "items")}) moves up to {up}. Its tags are unlinked.",
+            empty ? "Delete" : "Move contents up and delete", danger: true);
+        if (!ok) return;
+        var parent = _node.ParentId;
+        if (await RunAsync(async () => await Locations.DeleteAsync(await UserIdAsync(), Id, moveContents: true, PageToken)))
+        {
+            await Ui.RefreshAsync();
+            Nav.NavigateTo(parent is { } p ? $"l/{p}" : "");
+        }
+    }
+
+    private async Task AddLocationAsync()
+    {
+        if (Household is null || string.IsNullOrWhiteSpace(_newName)) return;
+        await RunAsync(async () =>
+        {
+            await Locations.CreateAsync(await UserIdAsync(), Household.Id, Id, _newName, _newKind, ct: PageToken);
+            _newName = "";
+            await LoadAsync();
+        });
+    }
+
+    private async Task SetPhotoAsync(IBrowserFile file)
+    {
+        await RunAsync(async () =>
+        {
+            await using var stream = file.OpenReadStream(Trovami.Core.Photos.PhotoStore.MaxUploadBytes, PageToken);
+            await Locations.SetPhotoAsync(await UserIdAsync(), Id, stream, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task RemovePhotoAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Locations.RemovePhotoAsync(await UserIdAsync(), Id, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task UnlinkAsync(TagView tag)
+    {
+        if (!await Ui.Confirm.AskAsync("Unlink this tag?",
+                tag.Kind == TagKind.Nfc ? "Scanning it then asks for a location again, so it can be used elsewhere." : "The printed label stops working.", "Unlink"))
+            return;
+        await RunAsync(async () =>
+        {
+            await Tags.UnlinkAsync(await UserIdAsync(), tag.Code, PageToken);
+            await LoadAsync();
+        });
+    }
+}

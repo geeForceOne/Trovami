@@ -1,0 +1,43 @@
+@inject HouseholdService Households
+
+@* Household invites waiting for an answer, above every page until accepted or declined. *@
+@foreach (var invite in Ui.Invites)
+{
+    <div class="banner banner-invite" role="status">
+        <Icon Name="users" />
+        <p>@($"{invite.InvitedBy} invited you to the household \"{invite.HouseholdName}\".")</p>
+        <button type="button" class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => AnswerAsync(invite, true)">Accept</button>
+        <button type="button" class="btn btn-ghost btn-sm" disabled="@_busy" @onclick="() => AnswerAsync(invite, false)">Decline</button>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private AppUi Ui { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _busy;
+
+    private async Task AnswerAsync(InviteView invite, bool accept)
+    {
+        _busy = true;
+        try
+        {
+            var userId = (await AuthState!).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value;
+            if (accept)
+                await Households.AcceptAsync(userId, invite.Id);
+            else
+                await Households.DeclineAsync(userId, invite.Id);
+            await Ui.RefreshAsync();
+            Ui.Toast.Success(accept ? $"You're in \"{invite.HouseholdName}\" now." : "Invite declined.");
+        }
+        catch (NotFoundException ex)
+        {
+            Ui.Toast.Error(ex.Message);
+            await Ui.RefreshAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

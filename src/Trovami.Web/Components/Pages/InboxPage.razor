@@ -1,0 +1,115 @@
+@page "/inbox"
+@inherits AppPage
+@inject ItemService Items
+@inject LocationService Locations
+
+<PageTitle>Inbox · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Inbox</h1>
+        <p class="page-sub">Items added without a location, usually on the phone. Give each one its place.</p>
+    </div>
+</div>
+
+@if (Household is not null)
+{
+    <ItemAdd OnAdded="ReloadAllAsync" />
+    <NamingWatcher Active="_items.Any(i => i.Naming)" OnTick="LoadAsync" />
+
+    @if (_items.Count > 0)
+    {
+        <div class="bulk-bar @(_selected.Count > 0 ? "active" : "")">
+            <label class="check">
+                <input type="checkbox" checked="@(_selected.Count == _items.Count)" @onchange="ToggleAll" />
+                @(_selected.Count > 0 ? $"{Format.Number(_selected.Count)} selected" : "Select all")
+            </label>
+            @if (_selected.Count > 0)
+            {
+                <LocationPicker Tree="_tree" Placeholder="@($"Move {Format.Count(_selected.Count, "item", "items")} to…")" OnPick="id => MoveAsync(_selected.ToList(), id)" />
+                <button type="button" class="btn btn-ghost btn-sm btn-danger-text" @onclick="DeleteSelectedAsync"><Icon Name="trash" Size="16" /> Delete</button>
+            }
+        </div>
+
+        <div class="item-grid inbox-grid">
+            @foreach (var item in _items)
+            {
+                <ItemCard Item="item" Selected="_selected.Contains(item.Id)" OnSelect="on => Select(item.Id, on)">
+                    @if (_selected.Count == 0)
+                    {
+                        <LocationPicker Tree="_tree" Placeholder="Put it in…" OnPick="id => MoveAsync([item.Id], id)" />
+                    }
+                </ItemCard>
+            }
+        </div>
+    }
+    else if (_loaded)
+    {
+        <div class="empty">
+            <Icon Name="inbox" Size="32" />
+            <p>The Inbox is empty: everything has its place.</p>
+        </div>
+    }
+}
+
+@code {
+    private bool _loaded;
+    private IReadOnlyList<ItemView> _items = [];
+    private LocationTree _tree = new([]);
+    private readonly HashSet<Guid> _selected = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReloadOnHouseholdChange(LoadAsync);
+        await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Household is null) return;
+        var userId = await UserIdAsync();
+        _items = await Items.InboxAsync(userId, Household.Id, PageToken);
+        _tree = await Locations.TreeAsync(userId, Household.Id, PageToken);
+        _selected.IntersectWith(_items.Select(i => i.Id));
+    }
+
+    // After adding or moving: the Inbox count in the navigation changes too (which reloads this page).
+    private Task ReloadAllAsync() => Ui.RefreshAsync();
+
+    private void Select(Guid id, bool on)
+    {
+        if (on) _selected.Add(id); else _selected.Remove(id);
+    }
+
+    private void ToggleAll(ChangeEventArgs e)
+    {
+        if (e.Value is true)
+            _selected.UnionWith(_items.Select(i => i.Id));
+        else
+            _selected.Clear();
+    }
+
+    private async Task MoveAsync(IReadOnlyCollection<Guid> ids, Guid? locationId)
+    {
+        if (locationId is null) return;
+        if (await RunAsync(async () => await Items.MoveAsync(await UserIdAsync(), ids, locationId, PageToken)))
+        {
+            Ui.Toast.Success($"{Format.Count(ids.Count, "item", "items")} moved to {_tree.PathOf(locationId)}.");
+            _selected.ExceptWith(ids);
+            await ReloadAllAsync();
+        }
+    }
+
+    private async Task DeleteSelectedAsync()
+    {
+        var ids = _selected.ToList();
+        if (!await Ui.Confirm.AskAsync($"Delete {Format.Count(ids.Count, "item", "items")}?", "They're removed with their photos for everyone in the household.", "Delete", danger: true))
+            return;
+        if (await RunAsync(async () => await Items.DeleteAsync(await UserIdAsync(), ids, PageToken)))
+        {
+            _selected.Clear();
+            await ReloadAllAsync();
+        }
+    }
+}

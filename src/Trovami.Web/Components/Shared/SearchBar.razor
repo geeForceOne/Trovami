@@ -1,0 +1,66 @@
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Finding things is the point of the app, so the search sits at the top of every page. *@
+@if (Ui.Household is not null)
+{
+    <form class="searchbar" role="search" @onsubmit="Go" @onsubmit:preventDefault="true">
+        <Icon Name="search" Size="18" />
+        <input class="searchbar-input" type="search" placeholder="Find something: drill, passport, blue box…" aria-label="Search"
+               @bind="_query" @bind:event="oninput" enterkeyhint="search" autocomplete="off" spellcheck="false" />
+        @if (!string.IsNullOrEmpty(_query))
+        {
+            <button type="button" class="btn btn-ghost btn-icon btn-sm" aria-label="Clear" @onclick="Clear"><Icon Name="x" Size="16" /></button>
+        }
+    </form>
+}
+
+@code {
+    [CascadingParameter] private AppUi Ui { get; set; } = default!;
+
+    private string _query = "";
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        // Shows up once the first household exists.
+        Ui.Changed += OnHouseholdChanged;
+        Sync();
+    }
+
+    // Shows the current search on the results page, and clears when leaving it.
+    private void Sync()
+    {
+        var uri = new Uri(Nav.Uri);
+        _query = uri.AbsolutePath.TrimEnd('/').EndsWith("/search")
+            ? System.Web.HttpUtility.ParseQueryString(uri.Query)["q"] ?? ""
+            : "";
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        Sync();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void Go()
+    {
+        if (!string.IsNullOrWhiteSpace(_query))
+            Nav.NavigateTo("search?q=" + Uri.EscapeDataString(_query.Trim()));
+    }
+
+    private void Clear()
+    {
+        _query = "";
+        if (new Uri(Nav.Uri).AbsolutePath.TrimEnd('/').EndsWith("/search"))
+            Nav.NavigateTo("");
+    }
+
+    private Task OnHouseholdChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        Ui.Changed -= OnHouseholdChanged;
+    }
+}

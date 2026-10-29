@@ -1,0 +1,68 @@
+name: Publish Docker image
+
+# Builds and pushes the app's container image to GitHub Container Registry as
+# ghcr.io/<owner>/trovami. Runs on GitHub's own runners, so no local Docker install is needed.
+# Triggers: every `vX.Y.Z` tag (moves `latest` and adds matching version tags), or manually via
+# workflow_dispatch. Plain pushes to main do NOT publish - tag a release to publish.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR image names must be lowercase.
+  IMAGE: trovami
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # GHCR image names must be lowercase; repository_owner preserves the account's casing.
+      - name: Compute image name
+        run: echo "IMAGE_NAME=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/${IMAGE}" >> "$GITHUB_ENV"
+
+      # The version the app shows: the tag without its "v" (v1.2.0 -> 1.2.0), or the short commit
+      # for a manual run without a tag, so every image can still be told apart.
+      - name: Compute app version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="dev-${GITHUB_SHA::7}"; fi
+          echo "APP_VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The labels include org.opencontainers.image.source, which links the package to this
+      # repository on GitHub even though its name differs.
+      - name: Extract image metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ env.APP_VERSION }}

@@ -1,0 +1,50 @@
+@* The app's mark: a map pin dropped onto a box, the "found it" spot, with an amber dot in the pin's
+   head. Below 40 px a simpler drawing with bolder lines and no lid is used, since the full one
+   blurs at header and favicon sizes. wwwroot/favicon.svg is the simple mark with fixed colors;
+   keep the two in step.
+   wwwroot/js/brand-motion.js animates it (drop, ping, wobble, open): once when the header or
+   sign-in logo is hovered or focused, once when a PlayOnLoad logo appears, and in a loop while
+   Busy. It only animates existing elements, so Blazor's rendering isn't disturbed. *@
+@{ var m = Size >= 40 ? Full : Simple; }
+<svg class="brand-mark" width="@Size" height="@Size" viewBox="0 0 64 64" aria-hidden="true"
+     data-motion="@(Busy ? "loop" : PlayOnLoad ? "once" : null)">
+    <ellipse class="bm-ping" cx="32" cy="@N(m.BoxTop)" rx="@N(m.PingRx)" ry="@N(m.PingRx * 0.32)" fill="none"
+             stroke="var(--brand-lit)" stroke-width="@N(m.Line * 0.7)" opacity="0" />
+    <g class="bm-box">
+        <rect x="@N(m.BoxX)" y="@N(m.BoxTop)" width="@N(64 - 2 * m.BoxX)" height="@N(m.BoxBottom - m.BoxTop)" rx="@N(m.Line)"
+              fill="none" stroke="var(--brand)" stroke-width="@N(m.Line)" stroke-linejoin="round" />
+        @if (m.Lid)
+        {
+            <line class="bm-lid" x1="@N(m.BoxX)" y1="@N(m.BoxTop + 6)" x2="@N(64 - m.BoxX)" y2="@N(m.BoxTop + 6)"
+                  stroke="var(--brand)" stroke-width="@N(m.Line * 0.75)" stroke-opacity=".6" stroke-linecap="round" />
+        }
+    </g>
+    <g class="bm-pin">
+        <path d="@m.Pin" fill="var(--logo-fill)" stroke="var(--brand)" stroke-width="@N(m.Line)" stroke-linejoin="round" />
+        <circle class="bm-dot" cx="32" cy="@N(m.HeadY)" r="@N(m.Dot)" fill="var(--brand-lit)" />
+    </g>
+</svg>
+
+@code {
+    private sealed record Mark(string Pin, double HeadY, double Dot, double BoxX, double BoxTop, double BoxBottom, double Line, double PingRx, bool Lid);
+
+    // The pin's tip reaches into the box's top edge, so it reads as "this box".
+    private static readonly Mark Full = new(
+        "M32 40C32 40 20 29.5 20 20.5A12 12 0 0 1 44 20.5C44 29.5 32 40 32 40Z", 20.5, 4.6,
+        BoxX: 12, BoxTop: 36, BoxBottom: 56, Line: 3, PingRx: 15, Lid: true);
+
+    private static readonly Mark Simple = new(
+        "M32 40C32 40 18 29 18 19A14 14 0 0 1 46 19C46 29 32 40 32 40Z", 19, 5.6,
+        BoxX: 9, BoxTop: 37, BoxBottom: 58, Line: 4.6, PingRx: 17, Lid: false);
+
+    // SVG wants a decimal point whatever the page's number format is ("4,6" would be dropped).
+    private static string N(double value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    [Parameter] public int Size { get; set; } = 30;
+
+    // Loops the animation, for the busy indicator.
+    [Parameter] public bool Busy { get; set; }
+
+    // Plays one motion shortly after the logo appears, for the sign-in page.
+    [Parameter] public bool PlayOnLoad { get; set; }
+}

@@ -1,0 +1,14 @@
+@page "/release-notes"
+@attribute [AllowAnonymous]
+
+<PageTitle>Release notes · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Release notes</h1>
+    </div>
+</div>
+
+<article class="release-notes">
+    @((MarkupString)ReleaseNotes.Html)
+</article>

@@ -1,0 +1,109 @@
+@page "/account/setup"
+@attribute [AllowAnonymous]
+@inject SignInManager<AppUser> SignInManager
+@inject UserManager<AppUser> UserManager
+@inject NavigationManager Nav
+@inject UserAdminService Users
+@inject UserActivityService Activity
+
+<PageTitle>Set up · @AppInfo.Name</PageTitle>
+
+<div class="auth-form">
+    <h1>Create the admin user</h1>
+    <p class="page-sub">This is a fresh installation. The user you create now is the administrator. After this, only you can add users.</p>
+
+    @if (_errors.Count > 0)
+    {
+        <div class="notice notice-error">
+            @foreach (var e in _errors)
+            {
+                <div>@e</div>
+            }
+        </div>
+    }
+
+    <EditForm Model="Input" method="post" OnSubmit="CreateAsync" FormName="setup" class="form">
+        <label class="field">
+            <span>Email address</span>
+            <InputText type="email" @bind-Value="Input!.Email" class="input" autocomplete="username" autofocus />
+            <span class="field-hint">You sign in with this. It's also where a forgotten-password link goes.</span>
+        </label>
+        <label class="field">
+            <span>Display name</span>
+            <InputText @bind-Value="Input!.DisplayName" class="input" autocomplete="nickname" maxlength="@AppUser.MaxDisplayNameLength" />
+            <span class="field-hint">@($"What {AppInfo.Name} calls you.")</span>
+        </label>
+        <label class="field">
+            <span>Password</span>
+            <InputText type="password" @bind-Value="Input!.Password" class="input" autocomplete="new-password" />
+            <span class="field-hint">At least 8 characters.</span>
+        </label>
+        <label class="field">
+            <span>Repeat password</span>
+            <InputText type="password" @bind-Value="Input!.Confirm" class="input" autocomplete="new-password" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-lg">Create admin user</button>
+    </EditForm>
+</div>
+
+@code {
+    private readonly List<string> _errors = [];
+
+    [SupplyParameterFromForm]
+    private SetupInput? Input { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+        if (UserManager.Users.Any())
+            Nav.NavigateTo("account/login");
+    }
+
+    private async Task CreateAsync()
+    {
+        // Checked again at submit time so two people racing the setup page can't both become admin.
+        if (UserManager.Users.Any())
+        {
+            Nav.NavigateTo("account/login");
+            return;
+        }
+
+        if (await Users.CheckEmailAsync(Input!.Email, exceptUserId: null) is { } emailError)
+            _errors.Add(emailError);
+        if (Users.CheckDisplayName(Input!.DisplayName) is { } nameError)
+            _errors.Add(nameError);
+        if (Input!.Password.Length < 8)
+            _errors.Add($"Use at least {(8)} characters for the password.");
+        else if (Input!.Password != Input!.Confirm)
+            _errors.Add("The passwords don't match.");
+        if (_errors.Count > 0)
+            return;
+
+        var email = Input!.Email.Trim();
+        var user = new AppUser
+        {
+            UserName = email,
+            Email = email,
+            DisplayName = string.IsNullOrWhiteSpace(Input!.DisplayName) ? null : Input!.DisplayName.Trim(),
+        };
+        var result = await UserManager.CreateAsync(user, Input!.Password);
+        if (!result.Succeeded)
+        {
+            _errors.AddRange(result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        await UserManager.AddToRoleAsync(user, Roles.Admin);
+        await SignInManager.SignInAsync(user, isPersistent: true);
+        await Activity.RecordLoginAsync(user.Id);
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    private sealed class SetupInput
+    {
+        public string Email { get; set; } = "";
+        public string? DisplayName { get; set; }
+        public string Password { get; set; } = "";
+        public string Confirm { get; set; } = "";
+    }
+}

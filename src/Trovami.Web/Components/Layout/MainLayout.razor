@@ -1,0 +1,151 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject SettingsService Settings
+@inject HouseholdService Households
+@inject ItemService Items
+@implements IDisposable
+
+<CascadingValue Value="_ui" IsFixed="true">
+<div class="shell">
+    <aside class="sidebar" aria-label="Navigation">
+        <a class="brand" href="">
+            <BrandMark Size="30" />
+            <span class="brand-name">@AppInfo.Name</span>
+        </a>
+
+        <AuthorizeView>
+            <Authorized>
+                <HouseholdSwitcher />
+
+                <nav class="side-nav" aria-label="Main">
+                    <NavLink href="" Match="NavLinkMatch.All" ActiveClass="active"><Icon Name="house" /><span>Locations</span></NavLink>
+                    <NavLink href="inbox" ActiveClass="active">
+                        <Icon Name="inbox" /><span>Inbox</span>
+                        @if (_ui.InboxCount > 0)
+                        {
+                            <span class="side-count">@Format.Number(_ui.InboxCount)</span>
+                        }
+                    </NavLink>
+                    <NavLink href="labels" ActiveClass="active"><Icon Name="qr" /><span>QR labels</span></NavLink>
+                    <NavLink href="household" ActiveClass="active"><Icon Name="users" /><span>Household</span></NavLink>
+                </nav>
+
+                <div class="side-foot">
+                    <UserMenu Name="@AppClaimsPrincipalFactory.ShownName(context.User)" IsAdmin="@context.User.IsInRole(Roles.Admin)" Up="true" />
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <div class="side-foot">
+                    <a class="btn btn-ghost btn-sm" href="account/login">Sign in</a>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+    </aside>
+
+    <header class="topbar">
+        <a class="brand" href="">
+            <BrandMark Size="28" />
+            <span class="brand-name">@AppInfo.Name</span>
+        </a>
+        <AuthorizeView>
+            <Authorized>
+                <UserMenu Name="@AppClaimsPrincipalFactory.ShownName(context.User)" IsAdmin="@context.User.IsInRole(Roles.Admin)" Compact="true" />
+            </Authorized>
+            <NotAuthorized>
+                <a class="btn btn-ghost btn-sm" href="account/login">Sign in</a>
+            </NotAuthorized>
+        </AuthorizeView>
+    </header>
+
+    <main class="main">
+        <AuthorizeView>
+            <SearchBar />
+            <WhatsNewBanner />
+            <InviteBanner />
+        </AuthorizeView>
+        @Body
+    </main>
+
+    <AuthorizeView>
+        <nav class="tabbar" aria-label="Main">
+            <NavLink href="" Match="NavLinkMatch.All" ActiveClass="active"><Icon Name="house" Size="22" />Locations</NavLink>
+            <NavLink href="inbox" ActiveClass="active">
+                <span class="tab-icon"><Icon Name="inbox" Size="22" />@if (_ui.InboxCount > 0) {<span class="tab-dot"></span>}</span>Inbox
+            </NavLink>
+            <NavLink href="labels" ActiveClass="active"><Icon Name="qr" Size="22" />Labels</NavLink>
+            <NavLink href="household" ActiveClass="active"><Icon Name="users" Size="22" />Household</NavLink>
+        </nav>
+    </AuthorizeView>
+</div>
+
+</CascadingValue>
+
+<ConfirmDialog @ref="_ui.Confirm" />
+<PromptDialog @ref="_ui.Prompt" />
+<Toast @ref="_ui.Toast" />
+
+<div id="blazor-error-ui" data-nosnippet>
+    Something went wrong and the page stopped responding.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">×</span>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private readonly AppUi _ui = new();
+    private string? _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        _ui.Reload = ReloadAsync;
+        if (AuthState is not null && (await AuthState).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { } userId)
+        {
+            _userId = userId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_userId is null) return;
+        _ui.Households = await Households.ListAsync(_userId);
+        _ui.Household = await Households.CurrentAsync(_userId);
+        _ui.Invites = await Households.InvitesForAsync(_userId);
+        _ui.InboxCount = _ui.Household is { } h ? await Items.InboxCountAsync(_userId, h.Id) : 0;
+    }
+
+    private async Task ReloadAsync()
+    {
+        await LoadAsync();
+        await _ui.RaiseChangedAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // The first visit takes the region format and time zone from the browser, then reloads so the
+    // page uses them.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _userId is null) return;
+        if (await Settings.ExistsAsync(_userId))
+            return;
+        try
+        {
+            var browser = await JS.InvokeAsync<string[]>("trovami.browserLocale");
+            await Settings.InitializeFromBrowserAsync(_userId, browser.ElementAtOrDefault(0), browser.ElementAtOrDefault(1));
+            var s = await Settings.GetAsync(_userId);
+            if (s.RegionFormat != System.Globalization.CultureInfo.CurrentCulture.Name)
+                Nav.Refresh(forceReload: true);
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

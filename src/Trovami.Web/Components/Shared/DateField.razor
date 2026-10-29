@@ -1,0 +1,86 @@
+@inject IJSRuntime JS
+
+@* A date in the person's region format (14.10.2026), typed or picked. The browser's own date
+   field shows the browser's language (10/14/2026) whatever the page says, so this is a text
+   field; the calendar button opens the browser's picker, whose choice is shown in the region format. *@
+<span class="date-field @(_invalid ? "invalid" : "")">
+    <input class="input date-text" value="@_text" @oninput="OnInput" @onblur="OnBlur" placeholder="@Pattern"
+           aria-label="@Label" aria-invalid="@(_invalid ? "true" : null)" autocomplete="off" spellcheck="false" inputmode="numeric" />
+    <button type="button" class="date-pick" title="Pick a date" aria-label="Pick a date" tabindex="-1" @onclick="OpenPickerAsync">
+        <Icon Name="calendar" Size="16" />
+    </button>
+    <input class="date-native" type="date" tabindex="-1" aria-hidden="true" @ref="_native"
+           value="@(Value?.ToString("yyyy-MM-dd") ?? "")" @onchange="OnPicked" />
+</span>
+
+@code {
+    [Parameter] public DateOnly? Value { get; set; }
+    [Parameter] public EventCallback<DateOnly?> ValueChanged { get; set; }
+    [Parameter] public string? Label { get; set; }
+
+    // For an optional date (an end date): an empty field means none.
+    [Parameter] public bool Optional { get; set; }
+
+    private string _text = "";
+    private bool _invalid;
+    private DateOnly? _shown;
+    private ElementReference _native;
+
+    // An example in the region format as the hint, which shows the order of day and month.
+    private string Pattern => DateOnly.FromDateTime(DateTime.Today).ToString("d", System.Globalization.CultureInfo.CurrentCulture);
+
+    protected override void OnParametersSet()
+    {
+        // Show the value in the region format, unless the person is in the middle of typing it.
+        if (Value != _shown)
+        {
+            _shown = Value;
+            _text = Value?.ToString("d", System.Globalization.CultureInfo.CurrentCulture) ?? "";
+            _invalid = false;
+        }
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? "";
+        if (Optional && string.IsNullOrWhiteSpace(_text))
+            await SetAsync(null);
+        else if (DateInput.TryParse(_text, System.Globalization.CultureInfo.CurrentCulture, DateOnly.FromDateTime(DateTime.Today), out var date))
+            await SetAsync(date);
+    }
+
+    // Leaving the field tidies it up: the parsed date in full, or marked when it can't be read.
+    private void OnBlur()
+    {
+        if (Optional && string.IsNullOrWhiteSpace(_text))
+        {
+            _invalid = false;
+            return;
+        }
+        _invalid = !DateInput.TryParse(_text, System.Globalization.CultureInfo.CurrentCulture, DateOnly.FromDateTime(DateTime.Today), out _);
+        if (!_invalid && Value is { } v)
+            _text = v.ToString("d", System.Globalization.CultureInfo.CurrentCulture);
+    }
+
+    private async Task OnPicked(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", out var date))
+        {
+            await SetAsync(date);
+            _text = date.ToString("d", System.Globalization.CultureInfo.CurrentCulture);
+        }
+    }
+
+    private async Task OpenPickerAsync()
+    {
+        try { await JS.InvokeVoidAsync("trovami.showPicker", _native); } catch (JSException) { }
+    }
+
+    private async Task SetAsync(DateOnly? date)
+    {
+        _invalid = false;
+        _shown = date;
+        Value = date;
+        await ValueChanged.InvokeAsync(date);
+    }
+}

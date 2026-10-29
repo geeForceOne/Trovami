@@ -1,0 +1,15 @@
+@inherits LayoutComponentBase
+
+<div class="auth">
+    <aside class="auth-side">
+        <a class="auth-brand" href="">
+            <BrandMark Size="132" PlayOnLoad="true" />
+            <span class="auth-name">@AppInfo.Name</span>
+        </a>
+        <p class="auth-tagline">Remembers where your things are, so you find them again.</p>
+        <a class="auth-version" href="release-notes">@AppInfo.Name @AppInfo.Version</a>
+    </aside>
+    <main class="auth-main">
+        @Body
+    </main>
+</div>

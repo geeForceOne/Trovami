@@ -1,0 +1,34 @@
+@* The kind of a location, which only picks its icon. *@
+<select class="select kind-select" aria-label="Kind" value="@Value" @onchange="OnChangeAsync">
+    @foreach (var kind in Enum.GetValues<LocationKind>())
+    {
+        <option value="@kind">@Format.KindLabel(kind)</option>
+    }
+</select>
+
+@code {
+    [Parameter] public LocationKind Value { get; set; }
+    [Parameter] public EventCallback<LocationKind> ValueChanged { get; set; }
+
+    private async Task OnChangeAsync(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<LocationKind>(e.Value?.ToString(), out var kind))
+        {
+            Value = kind;
+            await ValueChanged.InvokeAsync(kind);
+        }
+    }
+
+    // A sensible first guess for something new inside a location of this kind.
+    public static LocationKind ChildKind(LocationKind parent) => parent switch
+    {
+        LocationKind.House or LocationKind.Apartment => LocationKind.Room,
+        LocationKind.Floor => LocationKind.Room,
+        LocationKind.Room or LocationKind.Attic or LocationKind.Garage => LocationKind.Cabinet,
+        LocationKind.Cellar => LocationKind.Rack,
+        LocationKind.Closet or LocationKind.Cabinet => LocationKind.Shelf,
+        LocationKind.Rack or LocationKind.Shelf => LocationKind.Box,
+        LocationKind.Drawer or LocationKind.Box or LocationKind.Bag => LocationKind.Box,
+        _ => LocationKind.Other,
+    };
+}

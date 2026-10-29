@@ -1,0 +1,61 @@
+@inject ItemService Items
+@inherits AppPage
+
+@* Adding items inline: photos (several at once, each one an item the AI names), or a name. *@
+<div class="item-add">
+    <PhotoButton Label="Add with photos" Multiple="true" Disabled="Busy" OnPhoto="AddPhotoAsync" />
+    <span class="muted small">or</span>
+    <form class="inline-add" @onsubmit="AddNamedAsync" @onsubmit:preventDefault="true">
+        <input class="input" @bind="_name" @bind:event="oninput" placeholder="Type a name" maxlength="@Item.MaxNameLength" aria-label="New item name" />
+        <button type="submit" class="btn btn-secondary btn-sm" disabled="@(Busy || string.IsNullOrWhiteSpace(_name))"><Icon Name="plus" Size="16" /> Add</button>
+    </form>
+    @if (_progress is not null)
+    {
+        <span class="muted small">@_progress</span>
+    }
+</div>
+
+@code {
+    // Null: the Inbox.
+    [Parameter] public Guid? LocationId { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
+
+    private string _name = "";
+    private string? _progress;
+
+    private async Task AddPhotoAsync(IBrowserFile file)
+    {
+        if (Household is null) return;
+        _progress = $"Uploading {file.Name}…";
+        await RunAsync(async () =>
+        {
+            var userId = await UserIdAsync();
+            var id = Guid.NewGuid();
+            await Items.CreateAsync(userId, Household.Id, new ItemCreate(id, LocationId, null, null, PhotoExpected: true), PageToken);
+            try
+            {
+                await using var stream = file.OpenReadStream(Trovami.Core.Photos.PhotoStore.MaxUploadBytes, PageToken);
+                await Items.SetPhotoAsync(userId, id, stream, PageToken);
+            }
+            catch
+            {
+                // A photo that can't be read leaves no empty item behind.
+                await Items.DeleteAsync(userId, [id], CancellationToken.None);
+                throw;
+            }
+            await OnAdded.InvokeAsync();
+        });
+        _progress = null;
+    }
+
+    private async Task AddNamedAsync()
+    {
+        if (Household is null || string.IsNullOrWhiteSpace(_name)) return;
+        await RunAsync(async () =>
+        {
+            await Items.CreateAsync(await UserIdAsync(), Household.Id, new ItemCreate(Guid.NewGuid(), LocationId, _name, null), PageToken);
+            _name = "";
+            await OnAdded.InvokeAsync();
+        });
+    }
+}

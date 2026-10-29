@@ -1,0 +1,235 @@
+@page "/admin/settings"
+@attribute [Authorize(Roles = Roles.Admin)]
+@using Trovami.Core.Email
+@using Trovami.Core.Security
+@inherits AppPage
+@inject EmailSettingsService EmailSettings
+@inject AccountMailService Mail
+@inject AccountRequestService Requests
+
+<PageTitle>Admin settings · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Admin settings</h1>
+        <p class="page-sub">The mail server for invites and password resets, who may join, and what admins are told about.</p>
+    </div>
+</div>
+
+@if (_view is null)
+{
+    <p class="page-loading">…</p>
+}
+else
+{
+    <div class="settings">
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Mail server</h2>
+                <p>SMTP settings from your mail provider. Without them, invite and reset links are shown to you to pass on.</p>
+                <p class="muted small">@(_view.IsConfigured ? "Email is on." : "Email is off.")</p>
+            </div>
+            <div class="setting-body">
+                <form class="form" @onsubmit="SaveAsync" @onsubmit:preventDefault="true">
+                    <div class="field-row field-row-wrap">
+                        <label class="field field-grow">
+                            <span>Server</span>
+                            <input class="input" @bind="_host" placeholder="smtp-relay.brevo.com" spellcheck="false" autocomplete="off" />
+                        </label>
+                        <label class="field">
+                            <span>Port</span>
+                            <input class="input input-short" type="number" min="1" max="65535" @bind="_port" />
+                        </label>
+                        <label class="field">
+                            <span>Encryption</span>
+                            <select class="select" @bind="_security">
+                                <option value="@EmailSecurity.StartTls">STARTTLS</option>
+                                <option value="@EmailSecurity.SslOnConnect">SSL/TLS</option>
+                                <option value="@EmailSecurity.Auto">Automatic</option>
+                                <option value="@EmailSecurity.None">None</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="field-row field-row-wrap">
+                        <label class="field field-grow">
+                            <span>Username</span>
+                            <input class="input" @bind="_userName" spellcheck="false" autocomplete="off" />
+                        </label>
+                        <label class="field field-grow">
+                            <span>Password</span>
+                            <input class="input" type="password" @bind="_password" autocomplete="new-password"
+                                   placeholder="@(_view.Password == SecretStatus.Set ? "Saved; leave empty to keep it" : "")" />
+                            @if (_view.Password == SecretStatus.Unreadable)
+                            {
+                                <span class="field-error">The saved password can't be read anymore. Enter it again.</span>
+                            }
+                            else if (_view.Password == SecretStatus.Set)
+                            {
+                                <label class="check check-small"><input type="checkbox" @bind="_removePassword" /> Remove the saved password</label>
+                            }
+                        </label>
+                    </div>
+                    <div class="field-row field-row-wrap">
+                        <label class="field field-grow">
+                            <span>Sender address</span>
+                            <input class="input" type="email" @bind="_from" placeholder="trovami@example.com" spellcheck="false" />
+                        </label>
+                        <label class="field field-grow">
+                            <span>Sender name</span>
+                            <input class="input" @bind="_fromName" placeholder="@EmailSettingsService.DefaultFromName" />
+                        </label>
+                    </div>
+                    <label class="field">
+                        <span>The app's address <span class="muted">(optional)</span></span>
+                        <input class="input" type="url" @bind="_publicUrl" placeholder="https://trovami.example.com" spellcheck="false" />
+                        <span class="field-hint">Used for links in emails. Without it, links use the address you're using right now, which is wrong behind some reverse proxies.</span>
+                    </label>
+                    @foreach (var e in _errors)
+                    {
+                        <div class="field-error">@e</div>
+                    }
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
+                        <button type="button" class="btn btn-secondary" disabled="@(Busy || !_view.IsConfigured)" @onclick="TestAsync"><Icon Name="send" Size="15" /> Send a test email</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Account requests</h2>
+                <p>Let people ask for an account from the sign-in page. You approve or decline each request on the Users page.</p>
+            </div>
+            <div class="setting-body">
+                <label class="check">
+                    <input type="checkbox" checked="@_requestsOpen" disabled="@(!_view.IsConfigured)" @onchange="SetRequestsAsync" />
+                    Let people request an account
+                </label>
+                @if (!_view.IsConfigured)
+                {
+                    <p class="field-hint">Needs email: requesters hear back by email.</p>
+                }
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Household invites</h2>
+                <p>When someone invites an address without an account into their household, the account is created with the invite. Turn it off so that only admins create accounts; such invites are then refused.</p>
+            </div>
+            <div class="setting-body">
+                <label class="check">
+                    <input type="checkbox" checked="@_invitesCreate" @onchange="SetInvitesCreateAsync" />
+                    Household invites create accounts for new addresses
+                </label>
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Notifications</h2>
+                <p>Emails to you, as an admin.</p>
+            </div>
+            <div class="setting-body">
+                <label class="check">
+                    <input type="checkbox" checked="@_notifyJoined" @onchange="SetNotifyJoinedAsync" />
+                    Notify me when invited users join
+                </label>
+                <label class="check">
+                    <input type="checkbox" checked="@_notifyRequests" @onchange="SetNotifyRequestsAsync" />
+                    Notify me about account requests
+                </label>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private EmailSettingsView? _view;
+    private string? _host;
+    private int _port = 587;
+    private EmailSecurity _security = EmailSecurity.StartTls;
+    private string? _userName;
+    private string? _password;
+    private bool _removePassword;
+    private string? _from;
+    private string? _fromName;
+    private string? _publicUrl;
+    private IReadOnlyList<string> _errors = [];
+    private bool _requestsOpen;
+    private bool _invitesCreate = true;
+    private bool _notifyJoined;
+    private bool _notifyRequests;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        var me = await UserIdAsync();
+        _requestsOpen = await Requests.IsOpenAsync(PageToken);
+        _invitesCreate = await Requests.InvitesCreateAccountsAsync(PageToken);
+        _notifyJoined = await Mail.GetNotifyInviteAcceptedAsync(me);
+        _notifyRequests = await Mail.GetNotifyAccountRequestsAsync(me);
+    }
+
+    private async Task LoadAsync()
+    {
+        _view = await EmailSettings.GetAsync(PageToken);
+        _host = _view.Host;
+        _port = _view.Port;
+        _security = _view.Security;
+        _userName = _view.UserName;
+        _from = _view.From;
+        _fromName = _view.FromName;
+        _publicUrl = _view.PublicUrl;
+        _password = null;
+        _removePassword = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var newPassword = _removePassword ? "" : string.IsNullOrEmpty(_password) ? null : _password;
+            _errors = await EmailSettings.SaveAsync(new EmailSettingsUpdate(_host, _port, _security, _userName, newPassword, _from, _fromName, _publicUrl), PageToken);
+            if (_errors.Count == 0)
+            {
+                await LoadAsync();
+                Ui.Toast.Success("Email settings saved.");
+            }
+        });
+    }
+
+    private async Task TestAsync()
+    {
+        string to = "";
+        if (await RunAsync(async () => to = await Mail.SendTestAsync(await UserIdAsync(), PageToken)))
+            Ui.Toast.Success($"Test email sent to {to}.");
+    }
+
+    private async Task SetRequestsAsync(ChangeEventArgs e)
+    {
+        _requestsOpen = e.Value is true;
+        await Requests.SetOpenAsync(_requestsOpen, PageToken);
+        Ui.Toast.Success(_requestsOpen ? "People can now request an account." : "Account requests are closed.");
+    }
+
+    private async Task SetInvitesCreateAsync(ChangeEventArgs e)
+    {
+        _invitesCreate = e.Value is true;
+        await Requests.SetInvitesCreateAccountsAsync(_invitesCreate, PageToken);
+        Ui.Toast.Success(_invitesCreate ? "Household invites create accounts for new addresses." : "Only admins create accounts now.");
+    }
+
+    private async Task SetNotifyJoinedAsync(ChangeEventArgs e)
+    {
+        _notifyJoined = e.Value is true;
+        await Mail.SetNotifyInviteAcceptedAsync(await UserIdAsync(), _notifyJoined);
+    }
+
+    private async Task SetNotifyRequestsAsync(ChangeEventArgs e)
+    {
+        _notifyRequests = e.Value is true;
+        await Mail.SetNotifyAccountRequestsAsync(await UserIdAsync(), _notifyRequests);
+    }
+}

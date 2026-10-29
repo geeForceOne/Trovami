@@ -1,0 +1,323 @@
+@page "/household"
+@inherits AppPage
+@inject HouseholdService Households
+@inject HouseholdInviteService Invites
+@using Trovami.Core.Security
+@inject AiNamingService Ai
+
+<PageTitle>Household · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>@(Household?.Name ?? "Household")</h1>
+        <p class="page-sub">
+            @if (Household is { } h)
+            {
+                @(h.IsOwner ? "You own this household: you manage its members and its AI." : $"{h.OwnerName} owns this household. You see and edit everything in it.")
+            }
+        </p>
+    </div>
+</div>
+
+<div class="settings">
+    @if (Household is { } household)
+    {
+        @if (household.IsOwner)
+        {
+            <section class="setting">
+                <div class="setting-intro">
+                    <h2>Name</h2>
+                    <p>What everyone in the household sees.</p>
+                </div>
+                <div class="setting-body">
+                    <form class="inline-add" @onsubmit="RenameAsync" @onsubmit:preventDefault="true">
+                        <input class="input" @bind="_name" @bind:event="oninput" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
+                        <button type="submit" class="btn btn-secondary" disabled="@(Busy || string.IsNullOrWhiteSpace(_name) || _name.Trim() == household.Name)">Rename</button>
+                    </form>
+                </div>
+            </section>
+        }
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Members</h2>
+                <p>Everyone here sees and edits all locations and items.</p>
+            </div>
+            <div class="setting-body">
+                <ul class="member-list">
+                    @foreach (var m in _members)
+                    {
+                        <li>
+                            <span class="avatar">@m.Name[..1].ToUpperInvariant()</span>
+                            <span class="member-text">
+                                <span>@m.Name @if (m.IsOwner) {<span class="tag tag-quiet">Owner</span>}</span>
+                                <span class="muted small">@m.Email</span>
+                            </span>
+                            @if (household.IsOwner && !m.IsOwner)
+                            {
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => RemoveAsync(m)">Remove</button>
+                            }
+                        </li>
+                    }
+                    @foreach (var i in _invites)
+                    {
+                        <li class="pending">
+                            <span class="avatar"><Icon Name="mail" Size="16" /></span>
+                            <span class="member-text">
+                                <span>@i.UserName <span class="tag tag-quiet">Invited</span></span>
+                                <span class="muted small">@i.Email · @Format.Ago(i.CreatedAt)</span>
+                            </span>
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => CancelInviteAsync(i)">Cancel</button>
+                        </li>
+                    }
+                </ul>
+
+                @if (household.IsOwner)
+                {
+                    <form class="form invite-form" @onsubmit="InviteAsync" @onsubmit:preventDefault="true">
+                        <h3>Invite someone</h3>
+                        <div class="field-row field-row-wrap">
+                            <label class="field field-grow">
+                                <span>Email address</span>
+                                <input class="input" type="email" @bind="_inviteEmail" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+                            </label>
+                            <label class="field field-grow">
+                                <span>Name <span class="muted">(if they're new to @AppInfo.Name)</span></span>
+                                <input class="input" @bind="_inviteName" @bind:event="oninput" maxlength="@AppUser.MaxDisplayNameLength" autocomplete="off" />
+                            </label>
+                        </div>
+                        <div class="actions">
+                            <button type="submit" class="btn btn-primary" disabled="@(Busy || string.IsNullOrWhiteSpace(_inviteEmail))"><Icon Name="send" Size="16" /> Invite</button>
+                        </div>
+                        @if (_inviteResult is not null)
+                        {
+                            <div class="notice @(_inviteResult.Link is null ? "notice-good" : "notice-warn")" role="status">
+                                @_inviteResult.Message
+                                @if (_inviteResult.Link is not null)
+                                {
+                                    <div class="link-copy"><input class="input input-code" readonly value="@_inviteResult.Link" /></div>
+                                }
+                            </div>
+                        }
+                    </form>
+                }
+            </div>
+        </section>
+
+        @if (household.IsOwner && _ai is not null)
+        {
+            <section class="setting">
+                <div class="setting-intro">
+                    <h2>AI</h2>
+                    <p>Items added with a photo and no name get their name from the AI. It uses this household's own key, which never leaves the server.</p>
+                </div>
+                <div class="setting-body">
+                    <form class="form" @onsubmit="SaveAiAsync" @onsubmit:preventDefault="true">
+                        <div class="segmented segmented-wide" role="radiogroup" aria-label="AI provider">
+                            @foreach (var p in new[] { AiProvider.None, AiProvider.Claude, AiProvider.OpenAi })
+                            {
+                                <button type="button" class="@(_provider == p ? "on" : "")" role="radio" aria-checked="@(_provider == p ? "true" : "false")" @onclick="() => PickProvider(p)">@AiModels.ProviderName(p)</button>
+                            }
+                        </div>
+                        @if (_provider != AiProvider.None)
+                        {
+                            <label class="field">
+                                <span>Model</span>
+                                <select class="select" @bind="_model">
+                                    @foreach (var m in AiModels.For(_provider))
+                                    {
+                                        <option value="@m.Id">@m.Name</option>
+                                    }
+                                </select>
+                                <span class="field-hint">@AiModels.For(_provider).FirstOrDefault(m => m.Id == _model)?.Description</span>
+                            </label>
+                            <label class="field">
+                                <span>API key</span>
+                                <input class="input input-code" type="password" @bind="_key" @bind:event="oninput" autocomplete="off" spellcheck="false"
+                                       placeholder="@(_ai.Key == SecretStatus.Set && _provider == _ai.Provider ? "Saved; type to replace it" : _provider == AiProvider.Claude ? "sk-ant-…" : "sk-…")" />
+                                @if (_ai.Key == SecretStatus.Unreadable && _provider == _ai.Provider)
+                                {
+                                    <span class="field-error">The saved key can't be read anymore. Enter it again.</span>
+                                }
+                                <span class="field-hint">
+                                    @(_provider == AiProvider.Claude ? "Create one at console.anthropic.com under API keys." : "Create one at platform.openai.com under API keys.")
+                                    Naming an item costs a fraction of a cent with the recommended model.
+                                </span>
+                            </label>
+                        }
+                        <div class="actions">
+                            <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        }
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>@(household.IsOwner ? "Delete household" : "Leave household")</h2>
+                <p>@(household.IsOwner ? "Removes the household with all its locations, items, photos and tags, for everyone." : "You stop seeing it; everything in it stays for the others.")</p>
+            </div>
+            <div class="setting-body">
+                <div class="actions">
+                    @if (household.IsOwner)
+                    {
+                        <button type="button" class="btn btn-danger" @onclick="DeleteAsync">Delete @household.Name</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-secondary" @onclick="LeaveAsync">Leave @household.Name</button>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+
+    <section class="setting" id="new">
+        <div class="setting-intro">
+            <h2>New household</h2>
+            <p>For another place with its own things and people, like a holiday flat or a parent's house.</p>
+        </div>
+        <div class="setting-body">
+            <form class="inline-add" @onsubmit="CreateAsync" @onsubmit:preventDefault="true">
+                <input class="input" @bind="_newName" @bind:event="oninput" placeholder="Name" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="New household name" autofocus="@New" />
+                <button type="submit" class="btn btn-secondary" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName))"><Icon Name="plus" Size="16" /> Create</button>
+            </form>
+        </div>
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "new")] public bool New { get; set; }
+
+    private string _name = "";
+    private IReadOnlyList<MemberView> _members = [];
+    private IReadOnlyList<InviteView> _invites = [];
+    private string _inviteEmail = "";
+    private string _inviteName = "";
+    private HouseholdInviteResult? _inviteResult;
+    private AiSettingsView? _ai;
+    private AiProvider _provider;
+    private string _model = "";
+    private string _key = "";
+    private string _newName = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReloadOnHouseholdChange(LoadAsync);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _inviteResult = null;
+        if (Household is not { } h)
+            return;
+        var userId = await UserIdAsync();
+        _name = h.Name;
+        _members = await Households.MembersAsync(userId, h.Id, PageToken);
+        _invites = h.IsOwner ? await Households.InvitesAsync(userId, h.Id, PageToken) : [];
+        _ai = h.IsOwner ? await Ai.GetSettingsAsync(userId, h.Id, PageToken) : null;
+        if (_ai is not null)
+        {
+            _provider = _ai.Provider;
+            _model = _ai.Model;
+            _key = "";
+        }
+    }
+
+    private void PickProvider(AiProvider provider)
+    {
+        _provider = provider;
+        _model = provider == _ai?.Provider ? _ai.Model : AiModels.DefaultFor(provider);
+    }
+
+    private async Task RenameAsync()
+    {
+        if (await RunAsync(async () => await Households.RenameAsync(await UserIdAsync(), Household!.Id, _name, PageToken)))
+            await Ui.RefreshAsync();
+    }
+
+    private async Task InviteAsync()
+    {
+        await RunAsync(async () =>
+        {
+            _inviteResult = await Invites.InviteAsync(await UserIdAsync(), Household!.Id, _inviteEmail, _inviteName, Nav.BaseUri, PageToken);
+            var result = _inviteResult;
+            _inviteEmail = _inviteName = "";
+            await LoadAsync();
+            _inviteResult = result;
+        });
+    }
+
+    private async Task RemoveAsync(MemberView member)
+    {
+        if (!await Ui.Confirm.AskAsync($"Remove {member.Name}?", "They stop seeing this household. Everything they added stays.", "Remove", danger: true))
+            return;
+        await RunAsync(async () =>
+        {
+            await Households.RemoveMemberAsync(await UserIdAsync(), Household!.Id, member.UserId, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task CancelInviteAsync(InviteView invite)
+    {
+        await RunAsync(async () =>
+        {
+            await Households.CancelInviteAsync(await UserIdAsync(), invite.Id, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task SaveAiAsync()
+    {
+        var key = string.IsNullOrWhiteSpace(_key) ? null : _key;
+        if (_provider != AiProvider.None && key is null && (_ai?.Key != SecretStatus.Set || _provider != _ai.Provider))
+        {
+            Ui.Toast.Error("Enter the API key.");
+            return;
+        }
+        if (await RunAsync(async () =>
+        {
+            await Ai.SaveSettingsAsync(await UserIdAsync(), Household!.Id, _provider, _model, key, PageToken);
+            await LoadAsync();
+        }))
+            Ui.Toast.Success(_provider == AiProvider.None ? "AI naming is off." : "Saved. New photos are named from now on, and items that couldn't be named are tried again.");
+    }
+
+    private async Task DeleteAsync()
+    {
+        var h = Household!;
+        if (!await Ui.Confirm.AskAsync($"Delete {h.Name}?", "All its locations, items, photos and tags are removed for everyone. This can't be undone.", "Delete household", danger: true, typedConfirmation: h.Name))
+            return;
+        if (await RunAsync(async () => await Households.DeleteAsync(await UserIdAsync(), h.Id, PageToken)))
+        {
+            await Ui.RefreshAsync();
+            Nav.NavigateTo("");
+        }
+    }
+
+    private async Task LeaveAsync()
+    {
+        var h = Household!;
+        if (!await Ui.Confirm.AskAsync($"Leave {h.Name}?", "You stop seeing it. To come back, the owner invites you again.", "Leave"))
+            return;
+        if (await RunAsync(async () => await Households.RemoveMemberAsync(await UserIdAsync(), h.Id, await UserIdAsync(), PageToken)))
+        {
+            await Ui.RefreshAsync();
+            Nav.NavigateTo("");
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (await RunAsync(async () => await Households.CreateAsync(await UserIdAsync(), _newName, PageToken)))
+        {
+            Ui.Toast.Success($"{_newName.Trim()} is created and shown now.");
+            _newName = "";
+            await Ui.RefreshAsync();
+            Nav.NavigateTo("");
+        }
+    }
+}

@@ -1,0 +1,112 @@
+@* Picks a location by typing part of its name or path, inline: a text field with a list below it,
+   arrow keys and Enter to choose, Escape to close. Used wherever something moves. *@
+<div class="picker @(_open ? "open" : "")">
+    <input class="input picker-input" placeholder="@Placeholder" aria-label="@Placeholder" autocomplete="off" spellcheck="false"
+           @bind="_text" @bind:event="oninput" @bind:after="Filter" @onfocus="Open" @onkeydown="OnKeyAsync" @ref="_input" />
+    @if (_open)
+    {
+        <div class="menu-scrim" @onclick="Close"></div>
+        <ul class="picker-list" role="listbox">
+            @for (var i = 0; i < _matches.Count; i++)
+            {
+                var (id, name, path, kind) = _matches[i];
+                var index = i;
+                <li role="option" aria-selected="@(index == _active ? "true" : "false")" class="@(index == _active ? "active" : "")"
+                    @onmousedown="() => PickAsync(id)" @onmousedown:preventDefault="true" @onmouseover="() => _active = index">
+                    <Icon Name="@(id is null ? "inbox" : Format.KindIcon(kind))" Size="16" />
+                    <span class="picker-name">@name</span>
+                    @if (path.Length > 0)
+                    {
+                        <span class="picker-path">@path</span>
+                    }
+                </li>
+            }
+            @if (_matches.Count == 0)
+            {
+                <li class="picker-none">No location matches.</li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
+
+    // Offer the Inbox as a choice too.
+    [Parameter] public bool AllowInbox { get; set; }
+
+    // Leave out this location and everything under it (it can't move into itself).
+    [Parameter] public Guid? Exclude { get; set; }
+
+    // Leave out this one only (where the thing is now).
+    [Parameter] public Guid? Current { get; set; }
+
+    [Parameter] public string Placeholder { get; set; } = "Move to…";
+    [Parameter] public bool AutoFocus { get; set; }
+    [Parameter] public EventCallback<Guid?> OnPick { get; set; }
+
+    private const int MaxShown = 40;
+    private string _text = "";
+    private bool _open;
+    private int _active;
+    private ElementReference _input;
+    private List<(Guid? Id, string Name, string Path, LocationKind Kind)> _matches = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AutoFocus)
+        {
+            await _input.FocusAsync();
+            Open();
+            StateHasChanged();
+        }
+    }
+
+    private void Open()
+    {
+        _open = true;
+        Filter();
+    }
+
+    private void Close()
+    {
+        _open = false;
+        _text = "";
+    }
+
+    private void Filter()
+    {
+        _open = true;
+        var words = Search.Words(_text);
+        var excluded = Exclude is { } e ? Tree.Subtree(e).Select(n => n.Id).ToHashSet() : [];
+        var list = new List<(Guid?, string, string, LocationKind)>();
+        if (AllowInbox && Current is not null && words.All(w => "inbox".Contains(w)))
+            list.Add((null, "Inbox", "", LocationKind.Other));
+        list.AddRange(Tree.All
+            .Where(n => !excluded.Contains(n.Id) && n.Id != Current)
+            .Select(n => (Node: n, Path: Tree.PathOf(n.Id)))
+            .Where(x => words.All(w => Search.Normalize(x.Path + " " + x.Node.Label).Contains(w)))
+            .OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase)
+            .Take(MaxShown)
+            .Select(x => ((Guid?)x.Node.Id, x.Node.Name, x.Node.ParentId is null ? "" : Tree.PathOf(x.Node.ParentId), x.Node.Kind)));
+        _matches = list;
+        _active = 0;
+    }
+
+    private async Task OnKeyAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown": _active = Math.Min(_active + 1, _matches.Count - 1); _open = true; break;
+            case "ArrowUp": _active = Math.Max(_active - 1, 0); break;
+            case "Escape": Close(); break;
+            case "Enter" when _open && _matches.Count > 0: await PickAsync(_matches[_active].Id); break;
+        }
+    }
+
+    private async Task PickAsync(Guid? id)
+    {
+        Close();
+        await OnPick.InvokeAsync(id);
+    }
+}

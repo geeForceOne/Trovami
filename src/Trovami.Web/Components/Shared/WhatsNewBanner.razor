@@ -1,0 +1,39 @@
+@using System.Security.Claims
+@inject WhatsNewService WhatsNew
+
+@* After an update, tells each person once what's new; stays until they close it. *@
+@if (_version is not null)
+{
+    <div class="banner" role="status">
+        <Icon Name="file" />
+        <p>
+            @($"{AppInfo.Name} was updated to {_version}.")
+            <a href="release-notes">See what's new</a>
+        </p>
+        <button type="button" class="btn btn-ghost btn-icon btn-sm" aria-label="Close" title="Close" @onclick="DismissAsync">
+            <Icon Name="x" Size="16" />
+        </button>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string? _userId;
+    private string? _version;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = AuthState is null ? null : await AuthState;
+        _userId = state?.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (_userId is not null)
+            _version = await WhatsNew.PendingAsync(_userId);
+    }
+
+    private async Task DismissAsync()
+    {
+        _version = null;
+        if (_userId is not null)
+            await WhatsNew.DismissAsync(_userId);
+    }
+}

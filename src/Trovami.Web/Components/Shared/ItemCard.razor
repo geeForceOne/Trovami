@@ -1,0 +1,49 @@
+@* An item in a grid: its photo, name and quantity; opens the item. Select shows a checkbox for
+   picking several (the Inbox). *@
+<div class="item-card @(Selected ? "selected" : "")">
+    <a class="item-link" href="@($"i/{Item.Id}")">
+        <span class="item-photo">
+            @if (Item.PhotoVersion is { } v)
+            {
+                <img src="@Format.ItemPhoto(Item.Id, v)" alt="" loading="lazy" />
+            }
+            else
+            {
+                <span class="item-nophoto"><Icon Name="@(Item.PhotoExpected ? "clock" : "image")" Size="28" /></span>
+            }
+            @if (Item.Quantity > 1)
+            {
+                <span class="item-qty">@($"× {Format.Number(Item.Quantity)}")</span>
+            }
+        </span>
+        <span class="item-name @(Item.Name is null ? "unnamed" : "")">
+            @if (Item.Naming)
+            {
+                <span class="naming"><BrandMark Size="14" Busy="true" /> Naming…</span>
+            }
+            else
+            {
+                @Item.ShownName
+            }
+        </span>
+        @if (ShowPath)
+        {
+            <span class="item-path">@Item.Path</span>
+        }
+    </a>
+    @if (OnSelect.HasDelegate)
+    {
+        <label class="item-check" title="Select">
+            <input type="checkbox" checked="@Selected" @onchange="e => OnSelect.InvokeAsync(e.Value is true)" aria-label="@($"Select {Item.ShownName}")" />
+        </label>
+    }
+    @ChildContent
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ItemView Item { get; set; } = default!;
+    [Parameter] public bool ShowPath { get; set; }
+    [Parameter] public bool Selected { get; set; }
+    [Parameter] public EventCallback<bool> OnSelect { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,67 @@
+@using System.Globalization
+@using System.Security.Claims
+
+<!DOCTYPE html>
+<html lang="en" data-theme="@ThemeAttr">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    @* Before any paint: "system" becomes light or dark from the device, and follows it when it changes.
+       Settings calls trovamiApplyTheme to switch without a reload. *@
+    <script>
+        (function () {
+            var media = window.matchMedia("(prefers-color-scheme: light)"), pref;
+            window.trovamiApplyTheme = function (p) {
+                pref = p;
+                document.documentElement.dataset.theme = p === "system" ? (media.matches ? "light" : "dark") : p;
+            };
+            media.addEventListener("change", function () { if (pref === "system") window.trovamiApplyTheme(pref); });
+            window.trovamiApplyTheme(document.documentElement.dataset.theme);
+        })();
+    </script>
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="preload" href="fonts/plex-sans-latin-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="@Assets["fonts/fonts.css"]" />
+    <link rel="stylesheet" href="@Assets["css/app.css"]" />
+    <link rel="stylesheet" href="@Assets["Trovami.Web.styles.css"]" />
+    <link rel="icon" type="image/svg+xml" href="@Assets["favicon.svg"]" />
+    <meta name="theme-color" content="#0d1414" />
+    <ImportMap />
+    <HeadOutlet @rendermode="PageRenderMode" />
+</head>
+
+<body>
+    <Routes @rendermode="PageRenderMode" />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["js/app.js"]"></script>
+    <script src="@Assets["js/brand-motion.js"]"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [Inject]
+    private SettingsService Settings { get; set; } = default!;
+
+    // Signed-out pages (sign-in, first-run setup) use the default.
+    private Theme _theme = Theme.Dark;
+
+    private string ThemeAttr => _theme.ToString().ToLowerInvariant();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier) is { } userId)
+            _theme = (await Settings.GetAsync(userId, HttpContext.RequestAborted)).Theme;
+    }
+
+    // Account pages (sign-in, first-run setup, set password) render as plain server-side forms
+    // because they set the auth cookie; everything else is interactive, without prerendering.
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? new InteractiveServerRenderMode(prerender: false) : null;
+}

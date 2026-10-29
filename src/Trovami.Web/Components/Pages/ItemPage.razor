@@ -1,0 +1,214 @@
+@page "/i/{Id:guid}"
+@inherits AppPage
+@inject ItemService Items
+@inject LocationService Locations
+
+<PageTitle>@(_item?.ShownName ?? "Item") · @AppInfo.Name</PageTitle>
+
+@if (_item is null)
+{
+    <p class="page-loading">@(_missing ? "This item no longer exists." : "…")</p>
+}
+else
+{
+    <NamingWatcher Active="_item.Naming" OnTick="LoadAsync" />
+
+    <nav class="crumbs path" aria-label="Path">
+        @if (_item.LocationId is { } loc)
+        {
+            <a href="">Locations</a>
+            @foreach (var a in _tree.Ancestry(loc))
+            {
+                <span class="path-sep">›</span>
+                <a href="@($"l/{a.Id}")">@a.Name</a>
+            }
+        }
+        else
+        {
+            <a href="inbox">Inbox</a>
+        }
+    </nav>
+
+    <div class="item-page">
+        <div class="item-big-photo">
+            @if (_item.PhotoVersion is { } v)
+            {
+                <a href="@Format.ItemPhoto(_item.Id, v, thumb: false)" target="_blank"><img src="@Format.ItemPhoto(_item.Id, v, thumb: false)" alt="@_item.ShownName" /></a>
+            }
+            else
+            {
+                <div class="item-nophoto item-nophoto-lg"><Icon Name="@(_item.PhotoExpected ? "clock" : "image")" Size="48" />
+                    @if (_item.PhotoExpected) {<span class="muted small">The photo arrives when the phone syncs.</span>}
+                </div>
+            }
+            <div class="actions">
+                <PhotoButton Label="@(_item.PhotoVersion is null ? "Add photo" : "Replace photo")" Disabled="Busy" OnPhoto="SetPhotoAsync" />
+                @if (_item.PhotoVersion is not null)
+                {
+                    <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="RemovePhotoAsync">Remove photo</button>
+                }
+            </div>
+        </div>
+
+        <form class="form item-form" @onsubmit="SaveAsync" @onsubmit:preventDefault="true">
+            <label class="field">
+                <span>Name
+                    @if (_item.NameSource == NameSource.Ai) {<span class="ai-chip" title="Named by AI from the photo">AI</span>}
+                </span>
+                <input class="input input-lg" @bind="_name" @bind:event="oninput" maxlength="@Item.MaxNameLength"
+                       placeholder="@(_item.Naming ? "The AI is naming it…" : ItemView.UnnamedText)" />
+                @if (_item.Name is null && _item.AiNaming == AiNaming.Failed && _item.PhotoVersion is not null)
+                {
+                    <span class="field-hint">
+                        The AI couldn't name it (no AI key for this household, or it couldn't tell).
+                        <button type="button" class="link-button" @onclick="RetryAsync">Try again</button>
+                    </span>
+                }
+            </label>
+            <div class="field-row">
+                <label class="field">
+                    <span>Quantity</span>
+                    <input class="input input-short" type="number" min="1" max="@Item.MaxQuantity" @bind="_quantity" @bind:event="oninput" />
+                </label>
+            </div>
+            <label class="field">
+                <span>Notes</span>
+                <textarea class="textarea" rows="4" @bind="_notes" @bind:event="oninput" maxlength="@Item.MaxNotesLength"></textarea>
+            </label>
+            <div class="actions">
+                <button type="submit" class="btn btn-primary" disabled="@(Busy || !Changed)">Save</button>
+                @if (Changed)
+                {
+                    <button type="button" class="btn btn-ghost" @onclick="Reset">Undo changes</button>
+                }
+            </div>
+
+            <div class="field item-where">
+                <span>Location</span>
+                <div class="where-now">
+                    <Icon Name="@(_item.LocationId is null ? "inbox" : "pin")" Size="16" />
+                    <span>@_item.Path</span>
+                </div>
+                <LocationPicker Tree="_tree" AllowInbox="true" Current="_item.LocationId" Placeholder="Move to…" OnPick="MoveAsync" />
+            </div>
+
+            <p class="muted small">@($"Added {Format.Ago(_item.CreatedAt)}.")</p>
+            <div class="actions">
+                <button type="button" class="btn btn-ghost btn-sm btn-danger-text" @onclick="DeleteAsync"><Icon Name="trash" Size="16" /> Delete item</button>
+            </div>
+        </form>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private ItemView? _item;
+    private bool _missing;
+    private LocationTree _tree = new([]);
+    private string? _name;
+    private string? _notes;
+    private int _quantity = 1;
+
+    private bool Changed => _item is not null &&
+        ((_name ?? "").Trim() != (_item.Name ?? "") || (_notes ?? "").Trim() != (_item.Notes ?? "") || _quantity != _item.Quantity);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+        Reset();
+    }
+
+    private async Task LoadAsync()
+    {
+        var userId = await UserIdAsync();
+        try
+        {
+            var wasNaming = _item?.Naming == true;
+            _item = await Items.GetAsync(userId, Id, PageToken);
+            _tree = await Locations.TreeAsync(userId, _item.HouseholdId, PageToken);
+            // The AI's name arrives while the page is open; show it unless the person is typing.
+            if (wasNaming && !_item.Naming && string.IsNullOrWhiteSpace(_name))
+                _name = _item.Name;
+        }
+        catch (NotFoundException)
+        {
+            _item = null;
+            _missing = true;
+        }
+    }
+
+    private void Reset()
+    {
+        if (_item is null) return;
+        _name = _item.Name;
+        _notes = _item.Notes;
+        _quantity = _item.Quantity;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (await RunAsync(async () =>
+        {
+            await Items.UpdateAsync(await UserIdAsync(), Id, _name, _notes, _quantity, PageToken);
+            await LoadAsync();
+        }))
+        {
+            Reset();
+            Ui.Toast.Success("Saved.");
+        }
+    }
+
+    private async Task MoveAsync(Guid? locationId)
+    {
+        if (await RunAsync(async () =>
+        {
+            await Items.MoveAsync(await UserIdAsync(), [Id], locationId, PageToken);
+            await LoadAsync();
+        }))
+        {
+            Ui.Toast.Success($"Moved to {_item!.Path}.");
+            await Ui.RefreshAsync();
+        }
+    }
+
+    private async Task SetPhotoAsync(IBrowserFile file)
+    {
+        await RunAsync(async () =>
+        {
+            await using var stream = file.OpenReadStream(Trovami.Core.Photos.PhotoStore.MaxUploadBytes, PageToken);
+            await Items.SetPhotoAsync(await UserIdAsync(), Id, stream, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task RemovePhotoAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Items.RemovePhotoAsync(await UserIdAsync(), Id, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task RetryAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Items.RetryNamingAsync(await UserIdAsync(), Id, PageToken);
+            await LoadAsync();
+        });
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_item is null || !await Ui.Confirm.AskAsync($"Delete {_item.ShownName}?", "The item and its photo are removed for everyone in the household.", "Delete", danger: true))
+            return;
+        var back = _item.LocationId is { } l ? $"l/{l}" : "inbox";
+        if (await RunAsync(async () => await Items.DeleteAsync(await UserIdAsync(), [Id], PageToken)))
+        {
+            await Ui.RefreshAsync();
+            Nav.NavigateTo(back);
+        }
+    }
+}

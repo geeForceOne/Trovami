@@ -1,0 +1,427 @@
+@page "/profile"
+@inherits AppPage
+@using System.Globalization
+@inject UserAdminService Users
+@inject SettingsService Settings
+@inject DeviceService Devices
+@inject Trovami.Core.Email.EmailSettingsService EmailSettings
+@inject IJSRuntime JS
+
+<PageTitle>Profile · @AppInfo.Name</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Profile</h1>
+        <p class="page-sub">
+            @if (_me is not null)
+            {
+                @(_me.IsAdmin ? $"Signed in as {_me.ShownName} (administrator)." : $"Signed in as {_me.ShownName}.")
+            }
+        </p>
+    </div>
+</div>
+
+@if (_me is null)
+{
+    <p class="page-loading">…</p>
+}
+else
+{
+    <div class="settings">
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Name and email</h2>
+                <p>@($"Your name in {AppInfo.Name} and the email address you sign in with. Invites and password resets go to this address.")</p>
+            </div>
+            <div class="setting-body">
+                @if (ProfileSaved)
+                {
+                    <div class="notice notice-good" role="status">Profile saved.</div>
+                }
+                <form class="form" @onsubmit="SaveProfileAsync" @onsubmit:preventDefault="true">
+                    <label class="field">
+                        <span>Display name</span>
+                        <input class="input" @bind="_displayName" @bind:event="oninput" autocomplete="nickname" maxlength="@AppUser.MaxDisplayNameLength" />
+                    </label>
+                    <label class="field">
+                        <span>Email address</span>
+                        <input class="input" type="email" @bind="_email" @bind:event="oninput" autocomplete="email" spellcheck="false" />
+                    </label>
+                    @foreach (var e in _profileErrors)
+                    {
+                        <div class="field-error">@e</div>
+                    }
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_displayName) || !ProfileChanged)">Save</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Password</h2>
+                <p>Change the password you sign in with.</p>
+            </div>
+            <div class="setting-body">
+                @if (PasswordChanged)
+                {
+                    <div class="notice notice-good" role="status">Password changed. You're still signed in on this device.</div>
+                }
+                <form class="form" @onsubmit="ChangePasswordAsync" @onsubmit:preventDefault="true">
+                    @* Lets password managers tie the new password to the right account. *@
+                    <input type="text" value="@(_me.Email ?? _me.UserName)" autocomplete="username" hidden readonly />
+                    <label class="field">
+                        <span>Current password</span>
+                        <input class="input" type="password" @bind="_current" @bind:event="oninput" autocomplete="current-password" />
+                    </label>
+                    <div class="field-row">
+                        <label class="field">
+                            <span>New password</span>
+                            <input class="input" type="password" @bind="_new" @bind:event="oninput" autocomplete="new-password" />
+                            <span class="field-hint">At least 8 characters.</span>
+                        </label>
+                        <label class="field">
+                            <span>Repeat new password</span>
+                            <input class="input" type="password" @bind="_confirm" @bind:event="oninput" autocomplete="new-password" />
+                            @if (_confirm.Length > 0 && _confirm != _new)
+                            {
+                                <span class="field-error">The passwords don't match.</span>
+                            }
+                        </label>
+                    </div>
+                    @foreach (var e in _passwordErrors)
+                    {
+                        <div class="field-error">@e</div>
+                    }
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary"
+                                disabled="@(_busy || _current.Length == 0 || _new.Length < 8 || _confirm != _new)">Change password</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Appearance and formats</h2>
+                <p>Dark, light or like your device, and how numbers and dates are written. The app itself is in English.</p>
+            </div>
+            <div class="setting-body">
+                <div class="segmented segmented-wide" role="radiogroup" aria-label="Theme">
+                    @foreach (var (theme, label) in new[] { (Theme.Dark, "Dark"), (Theme.Light, "Light"), (Theme.System, "System") })
+                    {
+                        <button type="button" role="radio" aria-checked="@(_s?.Theme == theme ? "true" : "false")" class="@(_s?.Theme == theme ? "on" : "")" @onclick="() => SetThemeAsync(theme)">@label</button>
+                    }
+                </div>
+                <form class="form" @onsubmit="SaveFormatsAsync" @onsubmit:preventDefault="true">
+                    <div class="field-row field-row-wrap">
+                        <label class="field">
+                            <span>Region format</span>
+                            <select class="select" @bind="_region">
+                                @foreach (var r in Regions.RegionFormats)
+                                {
+                                    <option value="@r">@CultureInfo.GetCultureInfo(r).EnglishName</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>Time zone</span>
+                            <select class="select" @bind="_timeZone">
+                                @foreach (var id in Regions.TimeZoneIdsWith(_s?.TimeZone))
+                                {
+                                    <option value="@id">@id.Replace('_', ' ')</option>
+                                }
+                            </select>
+                        </label>
+                    </div>
+                    <div class="sample">
+                        <span class="muted small">Example</span>
+                        <span class="num">@(1234567.ToString("N0", Regions.Culture(_region)))</span>
+                        <span class="num">@DateTime.Now.ToString("g", Regions.Culture(_region))</span>
+                    </div>
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary" disabled="@(_busy || !FormatsChanged)">Save</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="setting" id="phone">
+            <div class="setting-intro">
+                <h2>Phones</h2>
+                <p>@($"The {AppInfo.Name} app adds things fast: scan a tag, take a photo, done. Connect it by scanning this code with the app, or sign in there with your email and password.")</p>
+            </div>
+            <div class="setting-body">
+                @if (_pairing is not null)
+                {
+                    <div class="pairing">
+                        <div class="pairing-qr">@((MarkupString)QrSvg.Render(PairingUri))</div>
+                        <div class="pairing-text">
+                            <p>Open the app and scan this code. It works once, for 10 minutes.</p>
+                            <p class="muted small">Or type it in the app:</p>
+                            <dl class="pairing-manual">
+                                <dt>Server</dt><dd><code class="code">@_serverUrl</code></dd>
+                                <dt>Code</dt><dd><code class="code pairing-code">@_pairing</code></dd>
+                            </dl>
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="DonePairingAsync">Done</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="actions">
+                        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="PairAsync"><Icon Name="phone" Size="16" /> Connect a phone</button>
+                        <a class="btn btn-ghost" href="@ReleasesUrl" target="_blank" rel="noopener noreferrer"><Icon Name="download" Size="16" /> Get the Android app</a>
+                    </div>
+                }
+                @if (_devices.Count > 0)
+                {
+                    <ul class="device-list">
+                        @foreach (var d in _devices)
+                        {
+                            <li>
+                                <Icon Name="phone" />
+                                <span class="member-text">
+                                    <span>@d.Name @if (d.AppVersion is not null) {<span class="muted small">@($"app {d.AppVersion}")</span>}</span>
+                                    <span class="muted small">@DeviceLine(d)</span>
+                                </span>
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => RevokeDeviceAsync(d)">Sign out</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </section>
+
+        <section class="setting">
+            <div class="setting-intro">
+                <h2>Homepage widget</h2>
+                <p>Shows how many items and locations you have, and what waits in the Inbox, on a gethomepage.dev dashboard. The widget signs in with a token that only reads these numbers.</p>
+            </div>
+            <div class="setting-body">
+                @if (_newToken is not null)
+                {
+                    <div class="notice notice-warn">
+                        <strong>Copy the token now</strong>
+                        <div>It's shown only this once. If you lose it, create a new one.</div>
+                        <div class="link-copy">
+                            <input class="input input-code" readonly value="@_newToken" aria-label="Token" onfocus="this.select()" />
+                            <button type="button" class="btn btn-primary btn-sm" @onclick="() => CopyAsync(_newToken)"><Icon Name="copy" Size="15" /> Copy</button>
+                        </div>
+                    </div>
+                }
+                @if (_s?.HasHomepageToken == true)
+                {
+                    <p>@($"A token was created {(_s.HomepageTokenCreatedAt is { } at ? Format.Date(at, _s.TimeZone) : "")}.")</p>
+                }
+                else
+                {
+                    <p class="muted">No token yet.</p>
+                }
+                <div class="actions">
+                    <button type="button" class="btn btn-secondary" disabled="@_busy" @onclick="CreateTokenAsync"><Icon Name="key" Size="16" /> @(_s?.HasHomepageToken == true ? "Replace token" : "Create token")</button>
+                    @if (_s?.HasHomepageToken == true)
+                    {
+                        <button type="button" class="btn btn-ghost btn-danger-text" disabled="@_busy" @onclick="RevokeTokenAsync">Revoke</button>
+                    }
+                </div>
+                <details class="howto">
+                    <summary>Widget settings for services.yaml</summary>
+                    <pre><code>- @AppInfo.Name:
+    widget:
+      type: customapi
+      url: @(Nav.BaseUri)api/homepage/stats
+      headers:
+        X-API-Key: @(_newToken ?? "trv_…")
+      mappings:
+        - field: items
+          label: Items
+          format: number
+        - field: locations
+          label: Locations
+          format: number
+        - field: inbox
+          label: Inbox
+          format: number</code></pre>
+                </details>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private const string ReleasesUrl = "https://github.com/geeForceOne/Trovami/releases/latest";
+
+    private SettingsView? _s;
+    private string _region = Regions.DefaultRegion;
+    private string _timeZone = Regions.DefaultTimeZone;
+    private string? _newToken;
+    private string? _pairing;
+    private string _serverUrl = "";
+    private IReadOnlyList<DeviceView> _devices = [];
+
+    private bool FormatsChanged => _s is not null && (_region != _s.RegionFormat || _timeZone != _s.TimeZone);
+
+    // What the app reads from the QR code: where the server is and the one-time code.
+    private string PairingUri => $"trovami://pair?server={Uri.EscapeDataString(_serverUrl)}&code={_pairing}";
+
+    private string DeviceLine(DeviceView d) =>
+        $"Connected {Format.Date(d.CreatedAt, _s?.TimeZone ?? Regions.DefaultTimeZone)}" + (d.LastSeenAt is { } seen ? $" · last seen {Format.Ago(seen)}" : "");
+
+    private async Task LoadSettingsAsync()
+    {
+        _s = await Settings.GetAsync(await UserIdAsync(), PageToken);
+        _region = _s.RegionFormat;
+        _timeZone = _s.TimeZone;
+    }
+
+    private async Task SetThemeAsync(Theme theme)
+    {
+        if (_s is null) return;
+        await Settings.SetThemeAsync(await UserIdAsync(), theme, PageToken);
+        _s = _s with { Theme = theme };
+        await JS.InvokeVoidAsync("trovamiApplyTheme", theme.ToString().ToLowerInvariant());
+    }
+
+    private async Task SaveFormatsAsync()
+    {
+        if (await RunAsync(async () => await Settings.SaveFormatsAsync(await UserIdAsync(), _region, _timeZone, PageToken)))
+            // The page's formats are fixed when it loads.
+            Nav.Refresh(forceReload: true);
+    }
+
+    private async Task PairAsync()
+    {
+        await RunAsync(async () =>
+        {
+            // The address the phone can reach: the public one from Admin settings when set.
+            _serverUrl = ((await EmailSettings.GetAsync(PageToken)).PublicUrl ?? Nav.BaseUri).TrimEnd('/');
+            _pairing = await Devices.CreatePairingCodeAsync(await UserIdAsync(), PageToken);
+        });
+    }
+
+    // The phone that just paired shows up in the list.
+    private async Task DonePairingAsync()
+    {
+        _pairing = null;
+        _devices = await Devices.ListAsync(await UserIdAsync(), PageToken);
+    }
+
+    private async Task RevokeDeviceAsync(DeviceView device)
+    {
+        if (!await Ui.Confirm.AskAsync($"Sign out {device.Name}?", "The app on it stops syncing until it's connected again. Items it hasn't sent yet stay on the phone.", "Sign out"))
+            return;
+        await RunAsync(async () =>
+        {
+            await Devices.RevokeAsync(await UserIdAsync(), device.Id, PageToken);
+            _devices = await Devices.ListAsync(await UserIdAsync(), PageToken);
+        });
+    }
+
+    private async Task CreateTokenAsync()
+    {
+        if (_s?.HasHomepageToken == true && !await Ui.Confirm.AskAsync("Replace the token?", "The widget stops working until you give it the new token.", "Replace token"))
+            return;
+        await RunAsync(async () =>
+        {
+            _newToken = await Settings.CreateHomepageTokenAsync(await UserIdAsync(), PageToken);
+            await LoadSettingsAsync();
+        });
+    }
+
+    private async Task RevokeTokenAsync()
+    {
+        if (!await Ui.Confirm.AskAsync("Revoke the token?", "The widget stops working.", "Revoke", danger: true))
+            return;
+        await RunAsync(async () =>
+        {
+            await Settings.RevokeHomepageTokenAsync(await UserIdAsync(), PageToken);
+            _newToken = null;
+            await LoadSettingsAsync();
+        });
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        if (await JS.InvokeAsync<bool>("trovami.copyText", text))
+            Ui.Toast.Success("Copied.");
+        else
+            Ui.Toast.Error("The browser didn't allow copying. Select the text and copy it by hand.");
+    }
+
+    // Set by /account/refresh-signin's redirect back here after a password or profile change.
+    [SupplyParameterFromQuery(Name = "changed")]
+    private bool PasswordChanged { get; set; }
+
+    [SupplyParameterFromQuery(Name = "saved")]
+    private bool ProfileSaved { get; set; }
+
+    private UserRow? _me;
+    private string _displayName = "";
+    private string _email = "";
+    private string _current = "";
+    private string _new = "";
+    private string _confirm = "";
+    private bool _busy;
+    private List<string> _profileErrors = [];
+    private List<string> _passwordErrors = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userId = await UserIdAsync();
+        _me = await Users.FindAsync(userId);
+        _displayName = _me?.DisplayName ?? "";
+        _email = _me?.Email ?? "";
+        await LoadSettingsAsync();
+        _devices = await Devices.ListAsync(userId, PageToken);
+    }
+
+    private bool NameChanged => _displayName.Trim() != (_me?.DisplayName ?? "");
+    private bool EmailChanged => _email.Trim() != (_me?.Email ?? "");
+    private bool ProfileChanged => NameChanged || EmailChanged;
+
+    private async Task SaveProfileAsync()
+    {
+        _busy = true;
+        try
+        {
+            var userId = await UserIdAsync();
+            _profileErrors = [];
+            if (NameChanged)
+                _profileErrors.AddRange(await Users.SetDisplayNameAsync(userId, _displayName));
+            if (_profileErrors.Count == 0 && EmailChanged)
+                _profileErrors.AddRange(await Users.SetEmailAsync(userId, _email));
+            if (_profileErrors.Count > 0)
+            {
+                _me = await Users.FindAsync(userId);
+                return;
+            }
+
+            // The name in the sidebar comes from the sign-in cookie; re-issue it so it shows the change.
+            Nav.NavigateTo("account/refresh-signin?returnUrl=" + Uri.EscapeDataString("/profile?saved=true"), forceLoad: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        _busy = true;
+        try
+        {
+            _passwordErrors = (await Users.ChangePasswordAsync(await UserIdAsync(), _current, _new)).ToList();
+            if (_passwordErrors.Count > 0) return;
+
+            // The password change rotated the security stamp; a full page load through this endpoint
+            // swaps in a fresh sign-in cookie so this device stays signed in.
+            Nav.NavigateTo("account/refresh-signin?returnUrl=" + Uri.EscapeDataString("/profile?changed=true"), forceLoad: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

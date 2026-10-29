@@ -1,0 +1,18 @@
+services:
+  trovami:
+    image: ghcr.io/geeforceone/trovami:latest
+    # `docker compose up --build` builds from this checkout instead of pulling the published image.
+    build: .
+    ports:
+      - "8337:8080"
+    environment:
+      # All persistent paths derive from this; override individually with
+      # Storage__DatabasePath, Storage__KeysPath or Storage__BackupsPath if needed.
+      Storage__DataDirectory: /data
+    volumes:
+      - trovami-data:/data
+    # Also brings the app back after a restore from Admin -> Backups, which restarts it.
+    restart: unless-stopped
+
+volumes:
+  trovami-data:

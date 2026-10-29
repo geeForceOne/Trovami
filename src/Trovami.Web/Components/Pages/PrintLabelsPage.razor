@@ -1,0 +1,55 @@
+@page "/labels/print"
+@layout PrintLayout
+@inherits AppPage
+@inject TagService Tags
+@inject HouseholdService Households
+@inject IJSRuntime JS
+
+<PageTitle>QR labels · @AppInfo.Name</PageTitle>
+
+<div class="print-bar no-print">
+    <span>@Format.Count(_labels.Count, "label", "labels")</span>
+    <button type="button" class="btn btn-primary" @onclick="PrintAsync"><Icon Name="print" Size="16" /> Print</button>
+    <a class="btn btn-ghost" href="labels">Back</a>
+</div>
+
+<div class="label-sheet label-@Size">
+    @foreach (var label in _labels)
+    {
+        <div class="qr-label">
+            <div class="qr-code">@((MarkupString)QrSvg.Render(label.Uri))</div>
+            <div class="qr-text">
+                @if (label.Label is not null)
+                {
+                    <span class="qr-big">@label.Label</span>
+                }
+                <span class="qr-name">@label.Name</span>
+                @if (label.Path.Length > 0)
+                {
+                    <span class="qr-path">@label.Path</span>
+                }
+                <span class="qr-brand">@AppInfo.Name · @label.Code</span>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? Ids { get; set; }
+    [SupplyParameterFromQuery] public string? Size { get; set; }
+
+    private IReadOnlyList<PrintLabel> _labels = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Size = Size is "s" or "l" ? Size : "m";
+        var ids = (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty)
+            .Where(g => g != Guid.Empty).Distinct().ToList();
+        // The print layout has no shell, so no shared household or toasts: look it up here.
+        var userId = await UserIdAsync();
+        if (await Households.CurrentAsync(userId, PageToken) is { } household && ids.Count > 0)
+            _labels = await Tags.LabelsForPrintAsync(userId, household.Id, ids, PageToken);
+    }
+
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("trovami.print");
+}

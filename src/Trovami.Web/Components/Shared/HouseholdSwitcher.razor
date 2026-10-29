@@ -1,0 +1,59 @@
+@inject HouseholdService Households
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* The household in the sidebar; with several, a menu to switch between them. *@
+@if (Ui.Household is { } current)
+{
+    <div class="hh-switch">
+        <button type="button" class="hh-button" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open"
+                disabled="@(Ui.Households.Count < 2)" title="@(Ui.Households.Count < 2 ? null : "Switch household")">
+            <span class="hh-label">Household</span>
+            <span class="hh-name">@current.Name</span>
+            @if (Ui.Households.Count > 1)
+            {
+                <Icon Name="chevrons" Size="16" />
+            }
+        </button>
+        @if (_open)
+        {
+            <div class="menu-scrim" @onclick="() => _open = false"></div>
+            <div class="menu-list hh-menu">
+                @foreach (var h in Ui.Households)
+                {
+                    <button type="button" @onclick="() => SwitchAsync(h.Id)">
+                        <Icon Name="@(h.Id == current.Id ? "check" : "house")" Size="16" />
+                        <span>@h.Name</span>
+                    </button>
+                }
+                <hr />
+                <a href="household?new=1" @onclick="() => _open = false"><Icon Name="plus" Size="16" /> New household</a>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter] private AppUi Ui { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _open;
+
+    // Re-renders when a household is created, renamed or switched.
+    protected override void OnInitialized() => Ui.Changed += OnChanged;
+
+    private Task OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Ui.Changed -= OnChanged;
+
+    private async Task SwitchAsync(Guid id)
+    {
+        _open = false;
+        var userId = (await AuthState!).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value;
+        await Households.SetCurrentAsync(userId, id);
+        await Ui.RefreshAsync();
+        // Location and item pages belong to the old household.
+        if (Nav.ToBaseRelativePath(Nav.Uri).StartsWith("l/") || Nav.ToBaseRelativePath(Nav.Uri).StartsWith("i/"))
+            Nav.NavigateTo("");
+    }
+}
