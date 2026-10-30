@@ -7,7 +7,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// The web app's colors (wwwroot/css/app.css): deep green-black shelves, one teal for actions,
+// The web app's colors (wwwroot/css/app.css): deep purple shelves in the dark, green-gray in the light, one teal for actions,
 // the logo's amber for "found". The app follows the phone's light or dark setting.
 private val Dark = darkColorScheme(
     primary = Color(0xFF5CC9B0),
@@ -16,19 +16,19 @@ private val Dark = darkColorScheme(
     onPrimaryContainer = Color(0xFF7FD8C3),
     secondary = Color(0xFFF2B44C),
     onSecondary = Color(0xFF241500),
-    background = Color(0xFF0D1414),
-    onBackground = Color(0xFFE4EBE9),
-    surface = Color(0xFF0D1414),
-    onSurface = Color(0xFFE4EBE9),
-    surfaceVariant = Color(0xFF1A2525),
-    onSurfaceVariant = Color(0xFFC0CCC9),
-    surfaceContainerLowest = Color(0xFF0A1010),
-    surfaceContainerLow = Color(0xFF131C1C),
-    surfaceContainer = Color(0xFF131C1C),
-    surfaceContainerHigh = Color(0xFF1A2525),
-    surfaceContainerHighest = Color(0xFF213030),
-    outline = Color(0xFF334747),
-    outlineVariant = Color(0xFF233232),
+    background = Color(0xFF140F1F),
+    onBackground = Color(0xFFECE8F2),
+    surface = Color(0xFF140F1F),
+    onSurface = Color(0xFFECE8F2),
+    surfaceVariant = Color(0xFF1D1630),
+    onSurfaceVariant = Color(0xFFC9C1D6),
+    surfaceContainerLowest = Color(0xFF0F0B18),
+    surfaceContainerLow = Color(0xFF1A1428),
+    surfaceContainer = Color(0xFF1A1428),
+    surfaceContainerHigh = Color(0xFF1D1630),
+    surfaceContainerHighest = Color(0xFF261D3B),
+    outline = Color(0xFF3A2F52),
+    outlineVariant = Color(0xFF2A2240),
     error = Color(0xFFF08A7E),
 )
 

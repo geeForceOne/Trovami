@@ -230,8 +230,56 @@ public class ServiceTests
         Assert.True(Assert.Single(await t.Households.ListAsync(ben)).IsOwner);
     }
 
-    private sealed class FixedNamer(string name) : IAiNamer
+    [Fact]
+    public async Task TheAiAddsKeywordsThatFindSearchesButNeverOverwritesAPersons()
     {
-        public Task<string?> NameAsync(byte[] jpeg, CancellationToken ct) => Task.FromResult<string?>(name);
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        t.Naming.NamerFactory = (_, _, _) => new FixedNamer("Cordless drill", "blue", "power tool");
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+
+        var typed = Guid.NewGuid();
+        var edited = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(typed, null, "My drill", null, PhotoExpected: true));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(edited, null, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, typed, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Items.SetPhotoAsync(anna, edited, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Items.UpdateAsync(anna, edited, null, null, 1, ["Red ", "red", "garden"]);
+
+        await t.Naming.NameAsync(typed, default);
+        await t.Naming.NameAsync(edited, default);
+
+        // A typed name keeps its name but still gets keywords from the photo.
+        var a = await t.Items.GetAsync(anna, typed);
+        Assert.Equal("My drill", a.Name);
+        Assert.Equal(["blue", "power tool"], a.Keywords);
+        Assert.Equal(AiNaming.NotNeeded, a.AiNaming);
+        // A person set keywords first: the AI still names it, but leaves the keywords alone.
+        var b = await t.Items.GetAsync(anna, edited);
+        Assert.Equal("Cordless drill", b.Name);
+        Assert.Equal(["red", "garden"], b.Keywords);
+
+        var found = await t.Items.SearchAsync(anna, home, "power tool");
+        Assert.Equal(typed, Assert.Single(found.Items).Id);
+    }
+
+    [Fact]
+    public void TheAiReplyGivesANameAndKeywords()
+    {
+        var both = AiNamer.ParseReply("**Cordless drill.**\nKeywords: Blue, plastic , power tool, blue\n");
+        Assert.Equal("Cordless drill", both.Name);
+        Assert.Equal(["blue", "plastic", "power tool"], both.Keywords);
+
+        var unknown = AiNamer.ParseReply("UNKNOWN\nKeywords: red");
+        Assert.Null(unknown.Name);
+        Assert.Equal(["red"], unknown.Keywords);
+
+        Assert.Empty(AiNamer.ParseReply("Passport").Keywords);
+    }
+
+    private sealed class FixedNamer(string name, params string[] keywords) : IAiNamer
+    {
+        public Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct) => Task.FromResult(new AiDescription(name, keywords));
     }
 }

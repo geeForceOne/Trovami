@@ -7,7 +7,7 @@
 <div class="page-head">
     <div>
         <h1>QR labels</h1>
-        <p class="page-sub">Pick the locations to label, print the sheet, cut the labels out and stick them on. Scanning one with the phone app adds items right there.</p>
+        <p class="page-sub">Pick the locations to label, then print a sheet to cut out, or a Dymo label roll. Scanning one with the phone app adds items right there.</p>
     </div>
 </div>
 
@@ -26,8 +26,9 @@ else
             <button type="button" class="@(_size == "s" ? "on" : "")" @onclick="@(() => _size = "s")">Small</button>
             <button type="button" class="@(_size == "m" ? "on" : "")" @onclick="@(() => _size = "m")">Medium</button>
             <button type="button" class="@(_size == "l" ? "on" : "")" @onclick="@(() => _size = "l")">Large</button>
+            <button type="button" class="@(_size == "dymo" ? "on" : "")" @onclick="@(() => _size = "dymo")" title="Dymo LabelWriter roll 99012, 89 x 36 mm">Dymo 99012</button>
         </div>
-        <a class="btn btn-primary @(_selected.Count == 0 ? "disabled" : "")" href="@PrintUrl" target="_blank" aria-disabled="@(_selected.Count == 0 ? "true" : "false")"><Icon Name="print" Size="16" /> Print sheet</a>
+        <a class="btn btn-primary @(_selected.Count == 0 ? "disabled" : "")" href="@PrintUrl" target="_blank" aria-disabled="@(_selected.Count == 0 ? "true" : "false")"><Icon Name="print" Size="16" /> @(_size == "dymo" ? "Print labels" : "Print sheet")</a>
         @if (_selected.Count > 0)
         {
             <button type="button" class="btn btn-ghost btn-sm" @onclick="_selected.Clear">Clear</button>

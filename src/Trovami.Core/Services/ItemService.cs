@@ -8,14 +8,14 @@ namespace Trovami.Core.Services;
 
 public sealed record ItemView(
     Guid Id, string ShortCode, Guid HouseholdId, string? Name, NameSource NameSource, AiNaming AiNaming, string? Notes, int Quantity,
-    Guid? LocationId, string Path, string? PhotoVersion, bool PhotoExpected, DateTime CreatedAt)
+    Guid? LocationId, string Path, string? PhotoVersion, bool PhotoExpected, DateTime CreatedAt, IReadOnlyList<string> Keywords)
 {
     public const string UnnamedText = "Unnamed item";
 
     public string ShownName => Name ?? UnnamedText;
 
     // Waiting for the AI to name it from its photo.
-    public bool Naming => Name is null && AiNaming == AiNaming.Pending;
+    public bool Naming => Name is null && NameSource != NameSource.Person && AiNaming == AiNaming.Pending;
 }
 
 // What the phone (or the web app's add form) sends for a new item. Id is chosen by the client.
@@ -115,8 +115,8 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             LocationId = locationId,
             Name = name,
             NameSource = name is null ? NameSource.None : NameSource.Person,
-            // Waits for the photo; named as soon as it arrives.
-            AiNaming = name is null && create.PhotoExpected ? AiNaming.Pending : AiNaming.NotNeeded,
+            // Waits for the photo; named (or just given keywords) as soon as it arrives.
+            AiNaming = create.PhotoExpected ? AiNaming.Pending : AiNaming.NotNeeded,
             Notes = CleanNotes(create.Notes),
             Quantity = CheckQuantity(create.Quantity),
             PhotoExpected = create.PhotoExpected,
@@ -127,8 +127,10 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
     }
 
     // A name typed by a person is final: the AI never overwrites it. Clearing the name makes it an
-    // "Unnamed item" again (the AI doesn't step in then either).
-    public async Task UpdateAsync(string userId, Guid id, string? name, string? notes, int quantity, CancellationToken ct = default)
+    // "Unnamed item" again, and the AI doesn't step in then either (the person chose no name).
+    // Keywords edited by a person are final the same way; null leaves them as they are.
+    public async Task UpdateAsync(string userId, Guid id, string? name, string? notes, int quantity,
+        IReadOnlyList<string>? keywords = null, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await LoadAsync(db, userId, id, ct);
@@ -136,9 +138,12 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         if (clean != item.Name)
         {
             item.Name = clean;
-            item.NameSource = clean is null ? NameSource.None : NameSource.Person;
-            item.AiNaming = AiNaming.NotNeeded;
+            item.NameSource = NameSource.Person;
         }
+        if (keywords is not null && ItemKeywords.Join(keywords) is var joined && joined != item.Keywords)
+            item.Keywords = joined;
+        if (item.AiNaming == AiNaming.Pending && !AiNamingService.NeedsAi(item))
+            item.AiNaming = AiNaming.NotNeeded;
         item.Notes = CleanNotes(notes);
         item.Quantity = CheckQuantity(quantity);
         item.UpdatedAt = DateTime.UtcNow;
@@ -149,10 +154,10 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await LoadAsync(db, userId, id, ct);
-        var clean = CleanName(name);
-        item.Name = clean;
-        item.NameSource = clean is null ? NameSource.None : NameSource.Person;
-        item.AiNaming = AiNaming.NotNeeded;
+        item.Name = CleanName(name);
+        item.NameSource = NameSource.Person;
+        if (item.AiNaming == AiNaming.Pending && !AiNamingService.NeedsAi(item))
+            item.AiNaming = AiNaming.NotNeeded;
         item.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
@@ -191,14 +196,15 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             photos.Delete(item.HouseholdId, item.Id);
     }
 
-    // Stores the item's photo. Without a name (and none typed by a person), the AI names it next.
+    // Stores the item's photo. Without a name (and none typed by a person) or keywords, the AI
+    // looks at it next.
     public async Task SetPhotoAsync(string userId, Guid id, Stream photo, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await LoadAsync(db, userId, id, ct);
         item.PhotoVersion = await photos.SaveAsync(item.HouseholdId, id, photo, ct);
         item.PhotoExpected = false;
-        if (item.Name is null && item.NameSource != NameSource.Person)
+        if (AiNamingService.NeedsAi(item))
             item.AiNaming = AiNaming.Pending;
         item.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -234,7 +240,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         naming.Enqueue(item.Id);
     }
 
-    // One search over the household: item names and notes, location names, labels and notes.
+    // One search over the household: item names, notes and keywords, location names, labels and notes.
     // Every word has to match somewhere (in the item or along its path), in any order.
     public async Task<SearchResult> SearchAsync(string userId, Guid householdId, string query, CancellationToken ct = default)
     {
@@ -259,7 +265,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
 
         var all = await db.Items.AsNoTracking().Where(i => i.HouseholdId == householdId).ToListAsync(ct);
         var items = all
-            .Select(i => (Item: i, Own: Search.Normalize($"{i.Name ?? ItemView.UnnamedText} {i.Notes}"), Path: PathText(i.LocationId)))
+            .Select(i => (Item: i, Own: Search.Normalize($"{i.Name ?? ItemView.UnnamedText} {i.Notes} {i.Keywords}"), Path: PathText(i.LocationId)))
             .Where(x => words.All(w => x.Own.Contains(w) || x.Path.Contains(w)) && words.Any(w => x.Own.Contains(w)))
             .Select(x => View(x.Item, tree))
             .OrderBy(i => i.ShownName, StringComparer.CurrentCultureIgnoreCase)
@@ -277,7 +283,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
 
     internal static ItemView View(Item i, LocationTree tree) =>
         new(i.Id, i.ShortCode, i.HouseholdId, i.Name, i.NameSource, i.AiNaming, i.Notes, i.Quantity, i.LocationId, tree.PathOf(i.LocationId),
-            i.PhotoVersion, i.PhotoExpected, i.CreatedAt);
+            i.PhotoVersion, i.PhotoExpected, i.CreatedAt, ItemKeywords.Split(i.Keywords));
 
     private static string? CleanName(string? name)
     {
@@ -297,6 +303,23 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
 
     private static int CheckQuantity(int quantity) =>
         quantity is >= 1 and <= Item.MaxQuantity ? quantity : throw new InputException("The quantity must be at least 1.");
+}
+
+// An item's keywords: lower case, trimmed, no doubles, stored as "a, b, c".
+public static class ItemKeywords
+{
+    public static IReadOnlyList<string> Clean(IEnumerable<string> words) => words
+        .Select(w => string.Join(' ', w.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim('"', '.', ' ').ToLowerInvariant())
+        .Where(w => w.Length > 0)
+        .Select(w => w.Length > Item.MaxKeywordLength ? w[..Item.MaxKeywordLength].Trim() : w)
+        .Distinct()
+        .Take(Item.MaxKeywords)
+        .ToList();
+
+    public static IReadOnlyList<string> Split(string? stored) =>
+        string.IsNullOrEmpty(stored) ? [] : stored.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+
+    public static string Join(IEnumerable<string> words) => string.Join(", ", Clean(words));
 }
 
 // Search text: lower case, accents removed, so "schlussel" finds "Schlüssel" and "cafe" finds "Café".

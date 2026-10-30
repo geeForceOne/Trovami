@@ -2,4 +2,6 @@
 <resources>
     <color name="paper">#F2F5F4</color>
     <color name="icon_background">#0D1414</color>
+    <!-- The pin's inside: the color it sits on, like the web logo. -->
+    <color name="icon_pin">#131C1C</color>
 </resources>

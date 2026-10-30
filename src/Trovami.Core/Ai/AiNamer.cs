@@ -5,6 +5,7 @@ using Anthropic;
 using Anthropic.Exceptions;
 using Anthropic.Models.Messages;
 using Trovami.Core.Models;
+using Trovami.Core.Services;
 
 namespace Trovami.Core.Ai;
 
@@ -44,10 +45,14 @@ public static class AiModels
     };
 }
 
-// Names one item from its photo. Returns null when the AI can't tell what it is.
+// What the AI saw in a photo. Name is null when it can't tell what the thing is; the keywords may
+// still say something (a color, a material).
+public sealed record AiDescription(string? Name, IReadOnlyList<string> Keywords);
+
+// Names one item from its photo and gives words to find it by.
 public interface IAiNamer
 {
-    Task<string?> NameAsync(byte[] jpeg, CancellationToken ct);
+    Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct);
 }
 
 public static class AiNamer
@@ -57,7 +62,10 @@ public static class AiNamer
         "Reply with a short, plain name for it in US English, 1 to 5 words, the way a person would label a box: " +
         "for example \"Cordless drill\", \"Christmas lights\", \"Passport\", \"Winter boots\". " +
         "Name the main thing in the photo; mention the brand only when it helps to tell it apart. " +
-        "Reply with the name only, no punctuation at the end. If you can't tell what it is, reply with exactly UNKNOWN.";
+        "Put the name alone on the first line, no punctuation at the end; if you can't tell what it is, write exactly UNKNOWN there. " +
+        "On the second line write \"Keywords:\" and up to 8 lowercase words or short phrases, separated by commas, " +
+        "that someone might search for: its colors, material, kind of thing and what it's for, and the brand if it's visible. " +
+        "For example: \"Keywords: blue, plastic, power tool, drilling, bosch\". Nothing else.";
 
     public static IAiNamer Create(AiProvider provider, string apiKey, string model) => provider switch
     {
@@ -66,8 +74,17 @@ public static class AiNamer
         _ => throw new AiException("AI naming is off for this household."),
     };
 
-    // The reply as a name: first line, without quotes or a closing period; null for UNKNOWN or
-    // nothing usable.
+    // The reply's name line and "Keywords:" line, in whichever order they came.
+    public static AiDescription ParseReply(string? reply)
+    {
+        var lines = (reply ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.Trim('*', ' ')).ToList();
+        var keywordLine = lines.FirstOrDefault(l => l.StartsWith("Keywords:", StringComparison.OrdinalIgnoreCase));
+        var name = CleanReply(lines.FirstOrDefault(l => l != keywordLine));
+        return new AiDescription(name, keywordLine is null ? [] : ItemKeywords.Clean(keywordLine["Keywords:".Length..].Split(',')));
+    }
+
+    // A name line without quotes or a closing period; null for UNKNOWN or nothing usable.
     public static string? CleanReply(string? reply)
     {
         var line = (reply ?? "").Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
@@ -83,13 +100,13 @@ public static class AiNamer
 // Claude through the official Anthropic SDK.
 internal sealed class ClaudeNamer(string apiKey, string model) : IAiNamer
 {
-    public async Task<string?> NameAsync(byte[] jpeg, CancellationToken ct)
+    public async Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct)
     {
         var client = new AnthropicClient { ApiKey = apiKey };
         var parameters = new MessageCreateParams
         {
             Model = model,
-            // Room for the model's thinking; the name itself is a few tokens.
+            // Room for the model's thinking; the answer itself is a few tokens.
             MaxTokens = 4000,
             System = AiNamer.Instructions,
             OutputConfig = new OutputConfig { Effort = Effort.Low },
@@ -133,9 +150,9 @@ internal sealed class ClaudeNamer(string apiKey, string model) : IAiNamer
         }
 
         if (response.StopReason?.ToString() == "refusal")
-            return null;
+            return new AiDescription(null, []);
         var text = string.Concat(response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));
-        return AiNamer.CleanReply(text);
+        return AiNamer.ParseReply(text);
     }
 }
 
@@ -144,7 +161,7 @@ internal sealed class OpenAiNamer(string apiKey, string model) : IAiNamer
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
 
-    public async Task<string?> NameAsync(byte[] jpeg, CancellationToken ct)
+    public async Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct)
     {
         var body = new JsonObject
         {
@@ -201,7 +218,7 @@ internal sealed class OpenAiNamer(string apiKey, string model) : IAiNamer
                     if (part?["type"]?.GetValue<string>() == "output_text")
                         output.Append(part["text"]?.GetValue<string>());
             }
-            return AiNamer.CleanReply(output.ToString());
+            return AiNamer.ParseReply(output.ToString());
         }
     }
 }

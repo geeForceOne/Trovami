@@ -11,6 +11,10 @@
     <span>@Format.Count(_labels.Count, "label", "labels")</span>
     <button type="button" class="btn btn-primary" @onclick="PrintAsync"><Icon Name="print" Size="16" /> Print</button>
     <a class="btn btn-ghost" href="labels">Back</a>
+    @if (Size == "dymo")
+    {
+        <span class="muted small">Pick the Dymo printer with paper "99012 Large Address" and margins "None"; each label prints on its own.</span>
+    }
 </div>
 
 <div class="label-sheet label-@Size">
@@ -42,7 +46,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        Size = Size is "s" or "l" ? Size : "m";
+        Size = Size is "s" or "l" or "dymo" ? Size : "m";
         var ids = (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty)
             .Where(g => g != Guid.Empty).Distinct().ToList();
         // The print layout has no shell, so no shared household or toasts: look it up here.

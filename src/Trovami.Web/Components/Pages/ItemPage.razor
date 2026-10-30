@@ -75,6 +75,18 @@ else
                 <span>Notes</span>
                 <textarea class="textarea" rows="4" @bind="_notes" @bind:event="oninput" maxlength="@Item.MaxNotesLength"></textarea>
             </label>
+            <div class="field">
+                <label for="keyword-input">Keywords</label>
+                <div class="keywords">
+                    @foreach (var k in _keywords)
+                    {
+                        <span class="keyword" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k}")" @onclick="() => RemoveKeyword(k)"><Icon Name="x" Size="14" /></button></span>
+                    }
+                    <input id="keyword-input" @bind="NewKeyword" @bind:event="oninput" maxlength="@Item.MaxKeywordLength"
+                           placeholder="@(_keywords.Count == 0 ? (_item.Naming ? "The AI is looking at it…" : "Add a keyword") : "Add")" />
+                </div>
+                <span class="field-hint">Find also matches these. The AI picks them from the photo; change them as you like. Separate them with a comma.</span>
+            </div>
             <div class="actions">
                 <button type="submit" class="btn btn-primary" disabled="@(Busy || !Changed)">Save</button>
                 @if (Changed)
@@ -112,9 +124,32 @@ else
     private string? _name;
     private string? _notes;
     private int _quantity = 1;
+    private List<string> _keywords = [];
+    private string _newKeyword = "";
+
+    // A comma ends a keyword; Enter (or Save) takes what's left, see SaveAsync.
+    private string NewKeyword
+    {
+        get => _newKeyword;
+        set
+        {
+            var parts = value.Split(',');
+            foreach (var part in parts[..^1])
+                AddKeyword(part);
+            _newKeyword = parts[^1];
+        }
+    }
 
     private bool Changed => _item is not null &&
-        ((_name ?? "").Trim() != (_item.Name ?? "") || (_notes ?? "").Trim() != (_item.Notes ?? "") || _quantity != _item.Quantity);
+        ((_name ?? "").Trim() != (_item.Name ?? "") || (_notes ?? "").Trim() != (_item.Notes ?? "") || _quantity != _item.Quantity
+         || !_keywords.SequenceEqual(_item.Keywords) || _newKeyword.Trim().Length > 0);
+
+    private void AddKeyword(string word)
+    {
+        _keywords = ItemKeywords.Clean(_keywords.Append(word)).ToList();
+    }
+
+    private void RemoveKeyword(string word) => _keywords.Remove(word);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -134,9 +169,12 @@ else
             if (Key != _item.ShortCode)
                 Nav.NavigateTo($"i/{_item.ShortCode}", replace: true);
             _tree = await Locations.TreeAsync(userId, _item.HouseholdId, PageToken);
-            // The AI's name arrives while the page is open; show it unless the person is typing.
+            // The AI's name and keywords arrive while the page is open; show them unless the person
+            // is typing or already added some.
             if (wasNaming && !_item.Naming && string.IsNullOrWhiteSpace(_name))
                 _name = _item.Name;
+            if (wasNaming && !_item.Naming && _keywords.Count == 0)
+                _keywords = _item.Keywords.ToList();
         }
         catch (NotFoundException)
         {
@@ -151,13 +189,19 @@ else
         _name = _item.Name;
         _notes = _item.Notes;
         _quantity = _item.Quantity;
+        _keywords = _item.Keywords.ToList();
+        _newKeyword = "";
     }
 
     private async Task SaveAsync()
     {
+        AddKeyword(_newKeyword);
+        _newKeyword = "";
         if (await RunAsync(async () =>
         {
-            await Items.UpdateAsync(await UserIdAsync(), Id, _name, _notes, _quantity, PageToken);
+            // Unchanged keywords aren't sent, so saving early doesn't stop the AI from adding them.
+            var keywords = _keywords.SequenceEqual(_item!.Keywords) ? null : _keywords;
+            await Items.UpdateAsync(await UserIdAsync(), Id, _name, _notes, _quantity, keywords, PageToken);
             await LoadAsync();
         }))
         {

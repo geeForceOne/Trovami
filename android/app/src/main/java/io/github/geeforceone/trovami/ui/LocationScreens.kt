@@ -1,5 +1,6 @@
 package io.github.geeforceone.trovami.ui
 
+import android.nfc.NfcAdapter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Nfc
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -53,12 +55,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.currentStateAsState
 import io.github.geeforceone.trovami.data.LocationRow
 import kotlinx.coroutines.launch
 
@@ -69,20 +75,75 @@ fun LinkTagScreen(model: MainViewModel, screen: Screen.LinkTag) {
         model = model,
         title = if (screen.written) "Tag set up" else "New tag",
         subtitle = "Where does this tag go? It's linked to the location you pick.",
-        onPick = { model.link(screen.code, it) },
+        onPick = { model.link(screen.code, it, screen.setup) },
+        onBack = { model.screen = if (screen.setup) Screen.SetUpTags else Screen.Camera },
     )
 }
 
-// Aim the camera without a tag.
+// Aim the camera without a tag. The camera is closed here, so a tag can be scanned instead.
 @Composable
 fun PickTargetScreen(model: MainViewModel) {
     LocationPicker(
         model = model,
         title = "Add to…",
-        subtitle = "New photos go to the location you pick.",
+        subtitle = "Hold a tag to the phone, or pick the location new photos go to.",
         onPick = { model.aimAt(it) },
         onInbox = { model.aimAt(null) },
     )
+}
+
+// Tags one after another: each new or unknown tag is linked to a location, then the next one.
+@Composable
+fun SetUpTagsScreen(model: MainViewModel) {
+    val context = LocalContext.current
+    // Checked again on return from the phone's settings.
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val nfcOn = remember(lifecycle) { NfcAdapter.getDefaultAdapter(context)?.isEnabled == true }
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        Row(Modifier.padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { model.screen = Screen.Camera }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
+            Text("Set up tags", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            HouseholdSwitcher(model)
+        }
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.Outlined.Nfc, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(72.dp))
+            val found = model.setUpFound
+            when {
+                !nfcOn -> Text("Turn on NFC in the phone's settings first.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                found != null -> {
+                    val (_, location) = found
+                    Text(
+                        if (location == null) "This tag is linked to a location that's gone."
+                        else "This tag goes to ${location.name}.",
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    OutlinedButton(onClick = model::relinkFound) { Text("Link it somewhere else") }
+                    SetUpHint("Or hold the next tag to the phone.")
+                }
+                else -> {
+                    model.setUpLinked?.let {
+                        Text("Linked to $it", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+                    }
+                    Text(
+                        if (model.setUpLinked == null) "Hold a new tag to the back of the phone" else "Hold the next tag to the phone",
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                    SetUpHint("A blank tag gets a Trovami code, then you pick where it goes.")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetUpHint(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
 }
 
 @Composable
@@ -115,6 +176,7 @@ private fun LocationPicker(
     subtitle: String,
     onPick: (LocationRow) -> Unit,
     onInbox: (() -> Unit)? = null,
+    onBack: () -> Unit = { model.screen = Screen.Camera },
 ) {
     val locations by model.locations.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
@@ -130,7 +192,7 @@ private fun LocationPicker(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { model.screen = Screen.Camera }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             HouseholdSwitcher(model)
         }

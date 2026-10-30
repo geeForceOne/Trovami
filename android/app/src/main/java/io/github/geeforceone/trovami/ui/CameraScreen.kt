@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,7 +73,7 @@ import java.util.concurrent.Executors
 private val Scrim = Color.Black.copy(alpha = 0.55f)
 
 // The app's home: the camera, aimed at the Inbox or at the location of the last scanned tag.
-// Each press of the shutter saves an item; the camera stays ready for the next one.
+// Each press of the shutter saves an item; the camera stays ready for the next one, until it's idle.
 @Composable
 fun CameraScreen(model: MainViewModel) {
     val capture = remember { photoCapture() }
@@ -79,6 +81,8 @@ fun CameraScreen(model: MainViewModel) {
     DisposableEffect(worker) { onDispose { worker.shutdown() } }
     var flash by remember { mutableStateOf(false) }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    // Bumped by each photo, so the idle time starts again.
+    var shots by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(flash) {
         if (flash) {
@@ -87,7 +91,16 @@ fun CameraScreen(model: MainViewModel) {
         }
     }
 
+    // Some phones read no tags while the camera is open, so it closes when it isn't used.
+    LaunchedEffect(model.cameraPaused, detailsOpen, shots) {
+        if (!model.cameraPaused && !detailsOpen) {
+            delay(CAMERA_IDLE_MILLIS)
+            model.cameraPaused = true
+        }
+    }
+
     fun shoot() {
+        shots++
         val typed = model.details
         model.details = Details()
         detailsOpen = false
@@ -107,7 +120,11 @@ fun CameraScreen(model: MainViewModel) {
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        WithCameraPermission { CameraPreview(Modifier.fillMaxSize(), capture) }
+        if (model.cameraPaused) {
+            CameraPausedView(onResume = { model.cameraPaused = false })
+        } else {
+            WithCameraPermission { CameraPreview(Modifier.fillMaxSize(), capture) }
+        }
         if (flash) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.5f)))
 
         Column(
@@ -128,10 +145,31 @@ fun CameraScreen(model: MainViewModel) {
             if (detailsOpen) DetailsCard(model)
             Box(Modifier.fillMaxWidth()) {
                 DetailsButton(model, detailsOpen, { detailsOpen = !detailsOpen }, Modifier.align(Alignment.CenterStart))
-                Shutter(::shoot, Modifier.align(Alignment.Center))
+                if (!model.cameraPaused) Shutter(::shoot, Modifier.align(Alignment.Center))
                 WaitingBadge(model, Modifier.align(Alignment.CenterEnd))
             }
         }
+    }
+}
+
+private const val CAMERA_IDLE_MILLIS = 20_000L
+
+// The idle camera: tags can be read now. Tapping anywhere opens the camera again.
+@Composable
+private fun CameraPausedView(onResume: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().clickable(onClick = onResume).padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Outlined.Nfc, contentDescription = null, tint = Color.White, modifier = Modifier.size(72.dp))
+        Text("Hold a tag to the phone", color = Color.White, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        Text(
+            "or tap to take photos",
+            color = Color.White.copy(alpha = 0.75f),
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -199,18 +237,15 @@ private fun CameraMenu(model: MainViewModel) {
                 onClick = { open = false; model.screen = Screen.PickTarget },
             )
             DropdownMenuItem(
-                text = { Text("Set up a tag") },
+                text = { Text("Set up tags") },
                 leadingIcon = { Icon(Icons.Outlined.Nfc, null) },
                 onClick = {
                     open = false
-                    val nfc = NfcAdapter.getDefaultAdapter(context)
-                    model.say(
-                        when {
-                            nfc == null -> "This phone has no NFC. Print QR labels in the web app instead."
-                            !nfc.isEnabled -> "Turn on NFC in the phone's settings first."
-                            else -> "Hold a new or unknown tag to the back of the phone."
-                        }
-                    )
+                    if (NfcAdapter.getDefaultAdapter(context) == null) {
+                        model.say("This phone has no NFC. Print QR labels in the web app instead.")
+                    } else {
+                        model.openSetUpTags()
+                    }
                 },
             )
             DropdownMenuItem(
