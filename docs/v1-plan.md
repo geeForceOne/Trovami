@@ -2,7 +2,7 @@
 
 Decisions are in `CLAUDE.md`; this file covers the order of work and the points still open.
 
-**Status (2026-10-29):** milestones 1–8 are built (web app and phone API, 62 unit tests). Milestone 9 (Android app) waits for Android Studio on this PC; milestone 10 after it. The open points below were taken with their defaults. Not a git repository yet: that, the GitHub repo and its license (point 5) come before the first push.
+**Status (2026-10-30):** milestones 1–8 are built (web app and phone API), and milestone 9 (Android app in `android/`: application ID `io.github.geeforceone.trovami`, Android 10 and newer) is tested on the emulator; its NFC flows still need a check on a real phone. Milestone 10 is next. The open points below were taken with their defaults. The repository is private on GitHub; its license and visibility (point 5) are still open.
 
 ## Milestones
 
