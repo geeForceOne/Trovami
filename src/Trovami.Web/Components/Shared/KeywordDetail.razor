@@ -1,0 +1,121 @@
+@inherits AppPage
+@inject ItemService Items
+
+@* The right pane of the Locations page for a keyword: the items that have it, from anywhere, and
+   ways to tidy it up across all of them. Changes tell the page through OnChanged, which reloads
+   the keyword list. *@
+<a class="loc-back" href="k"><Icon Name="left" Size="16" /> All keywords</a>
+
+<div class="loc-head">
+    <span class="loc-icon loc-icon-lg"><Icon Name="tag" Size="28" /></span>
+    <div class="loc-title">
+        <h1>@Keyword</h1>
+        <p class="page-sub">Keyword · @Format.Count(_items.Count, "item", "items")</p>
+    </div>
+    @if (_items.Count > 0)
+    {
+        <div class="page-actions">
+            <button type="button" class="btn btn-secondary btn-sm" disabled="@Busy" @onclick="RenameAsync"><Icon Name="edit" Size="16" /> Rename</button>
+            <button type="button" class="btn btn-ghost btn-sm" aria-expanded="@(_merging ? "true" : "false")" @onclick="() => _merging = !_merging"><Icon Name="move" Size="16" /> Merge into…</button>
+            <button type="button" class="btn btn-ghost btn-sm btn-danger-text" disabled="@Busy" @onclick="RemoveAsync"><Icon Name="trash" Size="16" /> Remove</button>
+        </div>
+    }
+</div>
+
+@if (_merging)
+{
+    var others = Keywords.Where(k => k.Keyword != Keyword).ToList();
+    <div class="inline-panel">
+        @if (others.Count == 0)
+        {
+            <span>There's no other keyword to merge it into.</span>
+        }
+        else
+        {
+            <span>@($"Replace \"{Keyword}\" on its items with:")</span>
+            <div class="chips keyword-targets">
+                @foreach (var k in others)
+                {
+                    <button type="button" class="chip" disabled="@Busy" @onclick="() => MergeAsync(k.Keyword)">@k.Keyword</button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (!_loaded)
+{
+    <p class="page-loading">…</p>
+}
+else if (_items.Count == 0)
+{
+    <div class="empty">
+        <Icon Name="tag" Size="32" />
+        <p>No item has this keyword anymore.</p>
+    </div>
+}
+else
+{
+    <ItemTable Items="_items" Tree="Tree" LocationId="null" />
+}
+
+@code {
+    [Parameter, EditorRequired] public string Keyword { get; set; } = "";
+    [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<KeywordCount> Keywords { get; set; } = [];
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private IReadOnlyList<ItemView> _items = [];
+    private bool _loaded;
+    private bool _merging;
+    private string? _shown;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_shown != Keyword)
+        {
+            _shown = Keyword;
+            _merging = false;
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Household is null) return;
+        _items = await Items.WithKeywordAsync(await UserIdAsync(), Household.Id, Keyword, PageToken);
+        _loaded = true;
+    }
+
+    // Renaming to a keyword that exists merges the two, the same as "Merge into…".
+    private async Task RenameAsync()
+    {
+        var name = await Ui.Prompt.AskAsync($"Rename \"{Keyword}\"", "New keyword", Keyword, "Rename",
+            hint: $"Changes it on {Format.Count(_items.Count, "item", "items")}. A keyword that already exists merges with it.");
+        if (string.IsNullOrWhiteSpace(name) || ItemKeywords.Clean([name]).FirstOrDefault() is not { } clean || clean == Keyword)
+            return;
+        await ReplaceAsync(clean, $"Renamed to \"{clean}\".");
+    }
+
+    private Task MergeAsync(string into) => ReplaceAsync(into, $"Merged into \"{into}\".");
+
+    private async Task RemoveAsync()
+    {
+        if (!await Ui.Confirm.AskAsync($"Remove \"{Keyword}\"?", $"It's taken off {Format.Count(_items.Count, "item", "items")}. The items stay.", "Remove", danger: true))
+            return;
+        await ReplaceAsync(null, $"Removed \"{Keyword}\".");
+    }
+
+    private async Task ReplaceAsync(string? newKeyword, string done)
+    {
+        if (Household is null) return;
+        if (await RunAsync(async () => await Items.ReplaceKeywordAsync(await UserIdAsync(), Household.Id, Keyword, newKeyword, PageToken)))
+        {
+            Ui.Toast.Success(done);
+            await OnChanged.InvokeAsync();
+            Nav.NavigateTo(newKeyword is null ? "" : KeywordLink(newKeyword));
+        }
+    }
+
+    public static string KeywordLink(string keyword) => $"k/{Uri.EscapeDataString(keyword)}";
+}

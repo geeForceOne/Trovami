@@ -492,6 +492,8 @@ td.num, th.num, .num.right { text-align: right; }
 .input::placeholder, .textarea::placeholder { color: var(--pencil); opacity: 0.8; }
 .input-code { font-family: var(--font-code); text-transform: uppercase; letter-spacing: 0.06em; max-width: 120px; }
 .input-code[readonly] { text-transform: none; letter-spacing: 0; max-width: none; }
+/* API keys: long and case-sensitive, so the whole width and the code font, as typed. */
+.input-key { font-family: var(--font-code); }
 .input-amount { text-align: right; font-variant-numeric: tabular-nums; }
 .input-lg { min-height: 46px; font-size: var(--t-xl); font-weight: 500; }
 .input-short { max-width: 110px; }
@@ -937,7 +939,6 @@ td.num, th.num, .num.right { text-align: right; }
 .tree-link:hover { text-decoration: none; }
 .tree-link:hover .tree-name { text-decoration: underline; }
 .tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.tree-tag { display: inline-flex; color: var(--pencil); }
 .tree-count { color: var(--pencil); font-size: var(--t-sm); font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
 .tree-row.on { background: var(--accent-soft); }
 .tree-row.on .tree-name { color: var(--accent); }
@@ -1023,6 +1024,25 @@ td.num, th.num, .num.right { text-align: right; }
 .loc-nav .tree { margin-bottom: 0; }
 .loc-nav .tree ul { margin-left: 12px; padding-left: 6px; }
 .loc-new { align-self: flex-start; }
+/* The most used keywords under the tree, and the link to all of them. */
+.keyword-head { justify-content: flex-start; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.keyword-head h2 { flex: 1; font-size: var(--t-lg); }
+.keyword-list .tree-link { padding-left: 10px; }
+.keyword-all { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; font-size: var(--t-sm); }
+.keyword-all.on { font-weight: 600; }
+.keyword-targets { margin-top: 0; }
+.keyword-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+.keyword-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--r-md);
+    background: var(--sheet);
+    color: var(--ink);
+}
+.keyword-link:hover { border-color: var(--accent); text-decoration: none; }
 .loc-pane { min-width: 0; }
 .loc-back { display: none; align-items: center; gap: 6px; margin-bottom: 12px; font-size: var(--t-sm); }
 .new-loc-parent { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -1071,6 +1091,16 @@ td.num, th.num, .num.right { text-align: right; }
 .item-name { padding: 9px 11px 2px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
 .item-name.unnamed { color: var(--pencil); font-style: italic; }
 .item-path { padding: 0 11px 9px; color: var(--pencil); font-size: var(--t-xs); }
+.item-keywords { display: block; padding: 2px 11px 9px; }
+/* An item's first keywords in lists (KeywordChips). */
+.keyword-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.keyword-chip { padding: 0 6px; border-radius: var(--r-sm); background: var(--sheet-3); color: var(--ink-soft); font-size: var(--t-xs); line-height: 1.6; }
+.keyword-more { color: var(--pencil); font-size: var(--t-xs); line-height: 1.6; }
+/* The Inbox as a table: select box with the name, "Put it in…" last. */
+.inbox-table tr.selected td { background: var(--accent-soft); }
+.inbox-row-check { align-items: center; }
+.inbox-row-check input { margin: 0; }
+.inbox-put { width: 240px; }
 .item-link > :last-child { padding-bottom: 10px; }
 .naming { display: inline-flex; align-items: center; gap: 6px; color: var(--pencil); font-style: normal; }
 .item-check { position: absolute; top: 8px; left: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); background: rgba(0, 0, 0, 0.5); cursor: pointer; }
@@ -1185,6 +1215,25 @@ td.num, th.num, .num.right { text-align: right; }
 .picker-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-path { grid-column: 2; color: var(--pencil); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-none { color: var(--pencil); cursor: default !important; }
+/* Nothing typed: the list is the tree, indented by depth, branches opened with the arrow. */
+.picker-tree li { display: flex; gap: 6px; padding-left: calc(4px + var(--depth, 0) * 16px); }
+.picker-toggle {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--pencil);
+    cursor: pointer;
+}
+button.picker-toggle:hover { color: var(--ink); background: var(--sheet-3); }
+.picker-tree li.here { cursor: default; }
+.picker-tree li.here .picker-name { color: var(--pencil); }
+.picker-here { margin-left: auto; padding-left: 8px; color: var(--pencil); font-size: var(--t-xs); white-space: nowrap; }
 
 /* ---------- Search results ---------- */
 

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Trovami.Core;
+using Trovami.Core.Ai;
 using Trovami.Core.Backup;
 using Trovami.Core.Data;
 using Trovami.Core.Localization;
@@ -149,6 +150,16 @@ await using (var scope = app.Services.CreateAsyncScope())
     var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
     if (!await roles.RoleExistsAsync(Roles.Admin))
         await roles.CreateAsync(new IdentityRole(Roles.Admin));
+}
+
+// A developer's own AI key from user secrets (dotnet user-secrets set "DevAi:Key" "…"), so local
+// test instances name items without a key entered per household. Never read outside Development.
+if (app.Environment.IsDevelopment() && app.Configuration["DevAi:Key"] is { Length: > 0 } devKey)
+{
+    var devProvider = Enum.TryParse<AiProvider>(app.Configuration["DevAi:Provider"], ignoreCase: true, out var p) && p != AiProvider.None
+        ? p : AiProvider.Claude;
+    app.Services.GetRequiredService<AiNamingService>().DevFallback = new DevAiKey(devProvider, devKey);
+    app.Logger.LogInformation("Development: households without an AI key use the developer's {Provider} key from user secrets.", devProvider);
 }
 
 if (!app.Environment.IsDevelopment())

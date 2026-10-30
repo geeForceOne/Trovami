@@ -109,7 +109,7 @@
             <section class="setting">
                 <div class="setting-intro">
                     <h2>AI</h2>
-                    <p>Items added with a photo and no name get their name from the AI. It uses this household's own key, which never leaves the server.</p>
+                    <p>Items added with a photo get their name (unless one was typed) and keywords from the AI. It uses this household's own key, which never leaves the server.</p>
                 </div>
                 <div class="setting-body">
                     <form class="form" @onsubmit="SaveAiAsync" @onsubmit:preventDefault="true">
@@ -133,7 +133,7 @@
                             </label>
                             <label class="field">
                                 <span>API key</span>
-                                <input class="input input-code" type="password" @bind="_key" @bind:event="oninput" autocomplete="off" spellcheck="false"
+                                <input class="input input-key" type="password" @bind="_key" @bind:event="oninput" autocomplete="off" spellcheck="false"
                                        placeholder="@(_ai.Key == SecretStatus.Set && _provider == _ai.Provider ? "Saved; type to replace it" : _provider == AiProvider.Claude ? "sk-ant-…" : "sk-…")" />
                                 @if (_ai.Key == SecretStatus.Unreadable && _provider == _ai.Provider)
                                 {

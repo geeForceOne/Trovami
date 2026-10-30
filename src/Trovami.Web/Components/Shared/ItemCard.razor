@@ -1,5 +1,5 @@
 @* An item in a grid: its photo, name and quantity; opens the item. Select shows a checkbox for
-   picking several (the Inbox). *@
+   picking several, ShowKeywords its first keywords (both in the Inbox). *@
 <div class="item-card @(Selected ? "selected" : "")">
     <a class="item-link" href="@($"i/{Item.ShortCode}")">
         <span class="item-photo">
@@ -26,9 +26,13 @@
                 @Item.ShownName
             }
         </span>
-        @if (ShowPath)
+        @if (ShowPath || !string.IsNullOrEmpty(PathText))
         {
-            <span class="item-path">@Item.Path</span>
+            <span class="item-path">@(PathText ?? Item.Path)</span>
+        }
+        @if (ShowKeywords && Item.Keywords.Count > 0)
+        {
+            <span class="item-keywords"><KeywordChips Keywords="Item.Keywords" /></span>
         }
     </a>
     @if (OnSelect.HasDelegate)
@@ -43,6 +47,10 @@
 @code {
     [Parameter, EditorRequired] public ItemView Item { get; set; } = default!;
     [Parameter] public bool ShowPath { get; set; }
+
+    // Shown instead of the full path, e.g. the path below the location being looked at.
+    [Parameter] public string? PathText { get; set; }
+    [Parameter] public bool ShowKeywords { get; set; }
     [Parameter] public bool Selected { get; set; }
     [Parameter] public EventCallback<bool> OnSelect { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }

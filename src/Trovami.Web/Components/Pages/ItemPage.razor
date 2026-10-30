@@ -16,7 +16,7 @@ else
     <nav class="crumbs path" aria-label="Path">
         @if (_item.LocationId is { } loc)
         {
-            <a href="">Locations</a>
+            <a href="">Inventory</a>
             @foreach (var a in _tree.Ancestry(loc))
             {
                 <span class="path-sep">›</span>
@@ -82,7 +82,8 @@ else
                     {
                         <span class="keyword" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k}")" @onclick="() => RemoveKeyword(k)"><Icon Name="x" Size="14" /></button></span>
                     }
-                    <input id="keyword-input" @bind="NewKeyword" @bind:event="oninput" maxlength="@Item.MaxKeywordLength"
+                    @* No maxlength: typed fast or pasted, several keywords sit in the box before the commas split them. *@
+                    <input id="keyword-input" @bind="NewKeyword" @bind:event="oninput"
                            placeholder="@(_keywords.Count == 0 ? (_item.Naming ? "The AI is looking at it…" : "Add a keyword") : "Add")" />
                 </div>
                 <span class="field-hint">Find also matches these. The AI picks them from the photo; change them as you like. Separate them with a comma.</span>

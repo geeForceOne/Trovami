@@ -1,0 +1,59 @@
+@* The right pane of the Locations page at /k: every keyword of the household, filtered as you
+   type. Picking one opens it, with its items and the tools to rename, merge or remove it. *@
+<a class="loc-back" href=""><Icon Name="left" Size="16" /> Inventory</a>
+
+<div class="page-head">
+    <div>
+        <h1>Keywords</h1>
+        <p class="page-sub">@Format.Count(Keywords.Count, "keyword", "keywords"). Pick one to see its items, or to rename, merge or remove it.</p>
+    </div>
+</div>
+
+@if (Keywords.Count == 0)
+{
+    <div class="empty">
+        <Icon Name="tag" Size="32" />
+        <p>No keywords yet. The AI adds them from item photos, and you can add them on an item's page.</p>
+    </div>
+}
+else
+{
+    var shown = Shown();
+    <div class="item-table-tools">
+        <input class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter keywords" autocomplete="off" spellcheck="false" />
+        <div class="segmented" role="radiogroup" aria-label="Order">
+            <button type="button" role="radio" aria-checked="@(!_byCount ? "true" : "false")" class="@(!_byCount ? "on" : "")" @onclick="() => _byCount = false">A–Z</button>
+            <button type="button" role="radio" aria-checked="@(_byCount ? "true" : "false")" class="@(_byCount ? "on" : "")" @onclick="() => _byCount = true">Most used</button>
+        </div>
+        @if (shown.Count != Keywords.Count)
+        {
+            <span class="muted small">@($"{Format.Number(shown.Count)} of {Format.Number(Keywords.Count)}")</span>
+        }
+    </div>
+    <div class="keyword-cloud">
+        @foreach (var k in shown)
+        {
+            <a class="keyword-link" href="@KeywordDetail.KeywordLink(k.Keyword)">@k.Keyword <span class="tree-count">@Format.Number(k.Items)</span></a>
+        }
+    </div>
+    @if (shown.Count == 0)
+    {
+        <p class="muted">@($"No keyword matches \"{_filter.Trim()}\".")</p>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<KeywordCount> Keywords { get; set; } = [];
+
+    private string _filter = "";
+    private bool _byCount;
+
+    private List<KeywordCount> Shown()
+    {
+        var words = Search.Words(_filter);
+        var hits = Keywords.Where(k => words.All(Search.Normalize(k.Keyword).Contains));
+        return (_byCount
+            ? hits.OrderByDescending(k => k.Items).ThenBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase)
+            : hits.OrderBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase)).ToList();
+    }
+}

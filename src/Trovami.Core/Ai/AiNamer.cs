@@ -30,6 +30,7 @@ public static class AiModels
     public static readonly IReadOnlyList<AiModelInfo> OpenAi =
     [
         new("gpt-6-luna", "GPT-6 Luna", "Fastest and cheapest; names everyday things well. Recommended."),
+        new("gpt-6.1-terra", "GPT-6.1 Terra", "Better at visual detail, at about 10 times the price."),
         new("gpt-6.1-sol", "GPT-6.1 Sol", "Better with unusual or technical things, at about 20 times the price."),
     ];
 
@@ -49,10 +50,11 @@ public static class AiModels
 // still say something (a color, a material).
 public sealed record AiDescription(string? Name, IReadOnlyList<string> Keywords);
 
-// Names one item from its photo and gives words to find it by.
+// Names one item from its photo and gives words to find it by. known: the household's keywords so
+// far, most used first, for the AI to reuse.
 public interface IAiNamer
 {
-    Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct);
+    Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct);
 }
 
 public static class AiNamer
@@ -65,7 +67,19 @@ public static class AiNamer
         "Put the name alone on the first line, no punctuation at the end; if you can't tell what it is, write exactly UNKNOWN there. " +
         "On the second line write \"Keywords:\" and up to 8 lowercase words or short phrases, separated by commas, " +
         "that someone might search for: its colors, material, kind of thing and what it's for, and the brand if it's visible. " +
-        "For example: \"Keywords: blue, plastic, power tool, drilling, bosch\". Nothing else.";
+        "For example: \"Keywords: blue, plastic, power tool, drilling, bosch\". Nothing else. " +
+        "If the message lists keywords the household already uses, take those wherever one fits, word for word, " +
+        "and only add a new keyword when none of them says it; new keywords are in US English. " +
+        "Some of the household's keywords may be in another language: reuse them as they are, " +
+        "but the name is always in US English, whatever language the keywords or any text on the thing are in.";
+
+    // The household's keywords that go along with the photo; more would cost tokens on every photo.
+    public const int MaxKnownKeywords = 200;
+
+    // The text sent with the photo.
+    internal static string Question(IReadOnlyList<string> known) => known.Count == 0
+        ? "What is this?"
+        : "What is this? Keywords this household already uses: " + string.Join(", ", known.Take(MaxKnownKeywords));
 
     public static IAiNamer Create(AiProvider provider, string apiKey, string model) => provider switch
     {
@@ -100,7 +114,7 @@ public static class AiNamer
 // Claude through the official Anthropic SDK.
 internal sealed class ClaudeNamer(string apiKey, string model) : IAiNamer
 {
-    public async Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct)
+    public async Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct)
     {
         var client = new AnthropicClient { ApiKey = apiKey };
         var parameters = new MessageCreateParams
@@ -117,7 +131,7 @@ internal sealed class ClaudeNamer(string apiKey, string model) : IAiNamer
                     Content = new List<ContentBlockParam>
                     {
                         new ImageBlockParam { Source = new Base64ImageSource { Data = Convert.ToBase64String(jpeg), MediaType = MediaType.ImageJpeg } },
-                        new TextBlockParam { Text = "What is this?" },
+                        new TextBlockParam { Text = AiNamer.Question(known) },
                     },
                 },
             ],
@@ -161,7 +175,7 @@ internal sealed class OpenAiNamer(string apiKey, string model) : IAiNamer
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
 
-    public async Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct)
+    public async Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct)
     {
         var body = new JsonObject
         {
@@ -175,7 +189,7 @@ internal sealed class OpenAiNamer(string apiKey, string model) : IAiNamer
                     ["content"] = new JsonArray
                     {
                         new JsonObject { ["type"] = "input_image", ["image_url"] = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg) },
-                        new JsonObject { ["type"] = "input_text", ["text"] = "What is this?" },
+                        new JsonObject { ["type"] = "input_text", ["text"] = AiNamer.Question(known) },
                     },
                 },
             },

@@ -76,6 +76,7 @@ private val Scrim = Color.Black.copy(alpha = 0.55f)
 // Each press of the shutter saves an item; the camera stays ready for the next one, until it's idle.
 @Composable
 fun CameraScreen(model: MainViewModel) {
+    val context = LocalContext.current
     val capture = remember { photoCapture() }
     val worker = remember { Executors.newSingleThreadExecutor() }
     DisposableEffect(worker) { onDispose { worker.shutdown() } }
@@ -132,8 +133,17 @@ fun CameraScreen(model: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(Modifier.fillMaxWidth()) {
-                TargetChip(model, Modifier.align(Alignment.CenterStart).padding(end = 64.dp))
-                Box(Modifier.align(Alignment.CenterEnd)) { CameraMenu(model) }
+                val hasNfc = remember { NfcAdapter.getDefaultAdapter(context) != null }
+                TargetChip(model, Modifier.align(Alignment.CenterStart).padding(end = if (hasNfc) 120.dp else 64.dp))
+                Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // For the impatient: closes the camera now instead of after the idle time.
+                    if (hasNfc && !model.cameraPaused) {
+                        Surface(color = Scrim, contentColor = Color.White, shape = CircleShape) {
+                            IconButton(onClick = { model.cameraPaused = true }) { Icon(Icons.Outlined.Nfc, contentDescription = "Scan a tag") }
+                        }
+                    }
+                    CameraMenu(model)
+                }
             }
             UpdateBanner(model)
         }

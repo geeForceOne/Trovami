@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
     <ProjectReference Include="..\Trovami.Core\Trovami.Core.csproj" />
@@ -28,6 +28,7 @@
          would otherwise append "+<commit hash>". -->
     <InformationalVersion>dev</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <UserSecretsId>5fa9a6d2-fda3-4397-a4f9-c1f04067655e</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

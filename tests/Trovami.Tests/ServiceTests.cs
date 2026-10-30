@@ -265,6 +265,32 @@ public class ServiceTests
     }
 
     [Fact]
+    public async Task KeywordsAreCountedRenamedMergedAndRemovedAcrossItems()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(a, null, "Drill", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(b, null, "Hammer", null));
+        await t.Items.UpdateAsync(anna, a, "Drill", null, 1, ["tools", "blue", "metallic"]);
+        await t.Items.UpdateAsync(anna, b, "Hammer", null, 1, ["tool", "metal"]);
+
+        Assert.Equal([new("blue", 1), new("metal", 1), new("metallic", 1), new("tool", 1), new("tools", 1)],
+            await t.Items.KeywordsAsync(anna, home));
+        // "metal" doesn't match "metallic".
+        Assert.Equal(b, Assert.Single(await t.Items.WithKeywordAsync(anna, home, "metal")).Id);
+
+        Assert.Equal(1, await t.Items.ReplaceKeywordAsync(anna, home, "tools", "Tool"));
+        Assert.Equal(1, await t.Items.ReplaceKeywordAsync(anna, home, "metallic", "metal"));
+        Assert.Equal(1, await t.Items.ReplaceKeywordAsync(anna, home, "blue", null));
+
+        Assert.Equal([new("metal", 2), new("tool", 2)], await t.Items.KeywordsAsync(anna, home));
+        Assert.Equal(["tool", "metal"], (await t.Items.GetAsync(anna, a)).Keywords);
+    }
+
+    [Fact]
     public void TheAiReplyGivesANameAndKeywords()
     {
         var both = AiNamer.ParseReply("**Cordless drill.**\nKeywords: Blue, plastic , power tool, blue\n");
@@ -278,8 +304,61 @@ public class ServiceTests
         Assert.Empty(AiNamer.ParseReply("Passport").Keywords);
     }
 
+    [Fact]
+    public async Task WithoutAHouseholdKeyTheDevelopersKeyIsUsed()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        (AiProvider, string)? used = null;
+        t.Naming.NamerFactory = (provider, key, _) => { used = (provider, key); return new FixedNamer("Passport", "document"); };
+        t.Naming.DevFallback = new DevAiKey(AiProvider.Claude, "sk-dev");
+
+        var id = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(id, null, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, id, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(id, default);
+
+        Assert.Equal((AiProvider.Claude, "sk-dev"), used);
+        Assert.Equal("Passport", (await t.Items.GetAsync(anna, id)).Name);
+    }
+
+    [Fact]
+    public async Task TheAiIsToldTheKeywordsTheHouseholdAlreadyUses()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var namer = new FixedNamer("Hammer", "metal");
+        t.Naming.NamerFactory = (_, _, _) => namer;
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+
+        var drill = Guid.NewGuid();
+        var saw = Guid.NewGuid();
+        var hammer = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(drill, null, "Drill", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(saw, null, "Saw", null));
+        await t.Items.UpdateAsync(anna, drill, "Drill", null, 1, ["tool", "blue"]);
+        await t.Items.UpdateAsync(anna, saw, "Saw", null, 1, ["tool", "metal"]);
+        await t.Items.CreateAsync(anna, home, new ItemCreate(hammer, null, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, hammer, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+
+        await t.Naming.NameAsync(hammer, default);
+
+        // Most used first.
+        Assert.Equal(["tool", "blue", "metal"], namer.Known);
+        Assert.StartsWith("What is this? Keywords this household already uses: tool, blue, metal", AiNamer.Question(namer.Known));
+        Assert.Equal("What is this?", AiNamer.Question([]));
+    }
+
     private sealed class FixedNamer(string name, params string[] keywords) : IAiNamer
     {
-        public Task<AiDescription> DescribeAsync(byte[] jpeg, CancellationToken ct) => Task.FromResult(new AiDescription(name, keywords));
+        public IReadOnlyList<string> Known { get; private set; } = [];
+
+        public Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct)
+        {
+            Known = known;
+            return Task.FromResult(new AiDescription(name, keywords));
+        }
     }
 }

@@ -21,6 +21,8 @@ public sealed record ItemView(
 // What the phone (or the web app's add form) sends for a new item. Id is chosen by the client.
 public sealed record ItemCreate(Guid Id, Guid? LocationId, string? Name, string? Notes, int Quantity = 1, bool PhotoExpected = false);
 
+public sealed record KeywordCount(string Keyword, int Items);
+
 public sealed record SearchResult(IReadOnlyList<ItemView> Items, IReadOnlyList<LocationNode> Locations, LocationTree Tree);
 
 public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, PhotoStore photos, AiNamingQueue naming)
@@ -271,6 +273,59 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             .OrderBy(i => i.ShownName, StringComparer.CurrentCultureIgnoreCase)
             .Take(MaxSearchResults).ToList();
         return new SearchResult(items, locations, tree);
+    }
+
+    // Every keyword in the household with how many items have it, A to Z.
+    public async Task<IReadOnlyList<KeywordCount>> KeywordsAsync(string userId, Guid householdId, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var stored = await db.Items.AsNoTracking()
+            .Where(i => i.HouseholdId == householdId && i.Keywords != null && i.Keywords != "")
+            .Select(i => i.Keywords).ToListAsync(ct);
+        return stored.SelectMany(ItemKeywords.Split)
+            .GroupBy(k => k)
+            .Select(g => new KeywordCount(g.Key, g.Count()))
+            .OrderBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    public async Task<IReadOnlyList<ItemView>> WithKeywordAsync(string userId, Guid householdId, string keyword, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var tree = await LocationService.LoadTreeAsync(db, householdId, ct);
+        return (await HavingKeywordAsync(db, householdId, keyword, ct)).Select(i => View(i, tree)).ToList();
+    }
+
+    // Renames a keyword on every item that has it; renaming it to one that exists merges the two.
+    // An empty newKeyword removes it. Returns how many items changed. Counts as a person's edit, so
+    // the AI leaves those items' keywords alone afterwards.
+    public async Task<int> ReplaceKeywordAsync(string userId, Guid householdId, string keyword, string? newKeyword, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var word = ItemKeywords.Clean([keyword]).FirstOrDefault() ?? "";
+        var replacement = ItemKeywords.Clean([newKeyword ?? ""]).FirstOrDefault();
+        var items = await HavingKeywordAsync(db, householdId, word, ct);
+        var now = DateTime.UtcNow;
+        foreach (var item in items)
+        {
+            var words = ItemKeywords.Split(item.Keywords).Select(k => k == word ? replacement : k).OfType<string>();
+            item.Keywords = ItemKeywords.Join(words);
+            item.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+        return items.Count;
+    }
+
+    private static async Task<List<Item>> HavingKeywordAsync(AppDbContext db, Guid householdId, string keyword, CancellationToken ct)
+    {
+        var word = ItemKeywords.Clean([keyword]).FirstOrDefault() ?? "";
+        // LIKE narrows it down in the database; the exact match is checked here.
+        var candidates = await db.Items
+            .Where(i => i.HouseholdId == householdId && i.Keywords != null && EF.Functions.Like(i.Keywords, "%" + word + "%"))
+            .ToListAsync(ct);
+        return candidates.Where(i => ItemKeywords.Split(i.Keywords).Contains(word)).ToList();
     }
 
     private static async Task<Item> LoadAsync(AppDbContext db, string userId, Guid id, CancellationToken ct)

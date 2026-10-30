@@ -2,6 +2,7 @@
 @inherits AppPage
 @inject ItemService Items
 @inject LocationService Locations
+@inject IJSRuntime JS
 
 <PageTitle>Inbox · @AppInfo.Name</PageTitle>
 
@@ -9,6 +10,10 @@
     <div>
         <h1>Inbox</h1>
         <p class="page-sub">Items added without a location, usually on the phone. Give each one its place.</p>
+    </div>
+    <div class="segmented" role="radiogroup" aria-label="Show items as">
+        <button type="button" role="radio" class="@(_table ? "" : "on")" aria-checked="@(_table ? "false" : "true")" @onclick="() => SetViewAsync(table: false)"><Icon Name="image" Size="16" /> Photos</button>
+        <button type="button" role="radio" class="@(_table ? "on" : "")" aria-checked="@(_table ? "true" : "false")" @onclick="() => SetViewAsync(table: true)"><Icon Name="list" Size="16" /> Table</button>
     </div>
 </div>
 
@@ -31,17 +36,71 @@
             }
         </div>
 
-        <div class="item-grid inbox-grid">
-            @foreach (var item in _items)
-            {
-                <ItemCard Item="item" Selected="_selected.Contains(item.Id)" OnSelect="on => Select(item.Id, on)">
-                    @if (_selected.Count == 0)
+        @if (_table)
+        {
+            @* No scrolling wrapper: it would cut off each row's "Put it in…" list. *@
+            <table class="table item-table inbox-table">
+                <thead>
+                    <tr>
+                        <th class="item-table-photo"><span class="visually-hidden">Photo</span></th>
+                        <th>Name</th>
+                        <th>Keywords</th>
+                        <th class="num">Qty</th>
+                        <th>Added</th>
+                        <th><span class="visually-hidden">Put it in</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in _items)
                     {
-                        <LocationPicker Tree="_tree" Placeholder="Put it in…" OnPick="id => MoveAsync([item.Id], id)" />
+                        var selected = _selected.Contains(item.Id);
+                        <tr @key="item.Id" class="@(selected ? "selected" : "")">
+                            <td class="item-table-photo">
+                                <a href="@($"i/{item.ShortCode}")" tabindex="-1">
+                                    @if (item.PhotoVersion is { } v)
+                                    {
+                                        <img src="@Format.ItemPhoto(item.Id, v)" alt="" loading="lazy" />
+                                    }
+                                    else
+                                    {
+                                        <span class="item-table-nophoto"><Icon Name="@(item.PhotoExpected ? "clock" : "image")" Size="16" /></span>
+                                    }
+                                </a>
+                            </td>
+                            <td data-label="Name" class="item-table-name">
+                                <label class="check inbox-row-check">
+                                    <input type="checkbox" checked="@selected" @onchange="e => Select(item.Id, e.Value is true)" aria-label="@($"Select {item.ShownName}")" />
+                                    <a href="@($"i/{item.ShortCode}")" class="@(item.Name is null ? "muted" : "")">@(item.Naming ? "Naming…" : item.ShownName)</a>
+                                </label>
+                            </td>
+                            <td data-label="Keywords"><KeywordChips Keywords="item.Keywords" /></td>
+                            <td data-label="Qty" class="num">@Format.Number(item.Quantity)</td>
+                            <td data-label="Added" class="nowrap">@Format.Ago(item.CreatedAt)</td>
+                            <td class="inbox-put">
+                                @if (_selected.Count == 0)
+                                {
+                                    <LocationPicker Tree="_tree" Placeholder="Put it in…" OnPick="id => MoveAsync([item.Id], id)" />
+                                }
+                            </td>
+                        </tr>
                     }
-                </ItemCard>
-            }
-        </div>
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <div class="item-grid inbox-grid">
+                @foreach (var item in _items)
+                {
+                    <ItemCard Item="item" ShowKeywords="true" Selected="_selected.Contains(item.Id)" OnSelect="on => Select(item.Id, on)">
+                        @if (_selected.Count == 0)
+                        {
+                            <LocationPicker Tree="_tree" Placeholder="Put it in…" OnPick="id => MoveAsync([item.Id], id)" />
+                        }
+                    </ItemCard>
+                }
+            </div>
+        }
     }
     else if (_loaded)
     {
@@ -53,7 +112,10 @@
 }
 
 @code {
+    private const string ViewPref = "inboxView";
+
     private bool _loaded;
+    private bool _table;
     private IReadOnlyList<ItemView> _items = [];
     private LocationTree _tree = new([]);
     private readonly HashSet<Guid> _selected = [];
@@ -72,6 +134,23 @@
         _items = await Items.InboxAsync(userId, Household.Id, PageToken);
         _tree = await Locations.TreeAsync(userId, Household.Id, PageToken);
         _selected.IntersectWith(_items.Select(i => i.Id));
+    }
+
+    // The view is remembered per browser, like a location's (see LocationDetail).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && await JS.InvokeAsync<string?>("trovami.getPref", ViewPref) == "table")
+        {
+            _table = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetViewAsync(bool table)
+    {
+        if (_table == table) return;
+        _table = table;
+        await JS.InvokeVoidAsync("trovami.setPref", ViewPref, table ? "table" : "photos");
     }
 
     // After adding or moving: the Inbox count in the navigation changes too (which reloads this page).

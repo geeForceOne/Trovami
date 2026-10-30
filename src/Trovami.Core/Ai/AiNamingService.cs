@@ -22,6 +22,9 @@ public sealed class AiNamingQueue
 
 public sealed record AiSettingsView(AiProvider Provider, string Model, SecretStatus Key);
 
+// A developer's own key for local test instances (see Program.cs); never set in production.
+public sealed record DevAiKey(AiProvider Provider, string Key);
+
 // Names items from their photos with the household's own AI key. Runs on the server as soon as a
 // photo arrives, so photos taken offline are named when the phone syncs.
 public sealed class AiNamingService(
@@ -32,6 +35,10 @@ public sealed class AiNamingService(
 
     // Overridable in tests.
     internal Func<AiProvider, string, string, IAiNamer> NamerFactory { get; set; } = AiNamer.Create;
+
+    // Development only: used for households without a working key of their own, so throwaway
+    // instances can name items without entering a key each time.
+    public DevAiKey? DevFallback { get; set; }
 
     public async Task<AiSettingsView> GetSettingsAsync(string userId, Guid householdId, CancellationToken ct = default)
     {
@@ -113,18 +120,35 @@ public sealed class AiNamingService(
 
         var household = await db.Households.AsNoTracking().FirstAsync(h => h.Id == item.HouseholdId, ct);
         var key = _protector.Read(household.AiKeyProtected);
+        var provider = household.AiProvider;
+        var apiKey = key.Status == SecretStatus.Set ? key.Value : null;
+        var model = household.AiModel ?? AiModels.DefaultFor(provider);
+        if ((provider == AiProvider.None || apiKey is null) && DevFallback is { } dev)
+            (provider, apiKey, model) = (dev.Provider, dev.Key, AiModels.DefaultFor(dev.Provider));
         var jpeg = await photos.ReadAsync(item.HouseholdId, item.Id, ct);
-        if (household.AiProvider == AiProvider.None || key.Status != SecretStatus.Set || jpeg is null)
+        if (provider == AiProvider.None || apiKey is null || jpeg is null)
         {
             await SetStateAsync(db, itemId, AiNaming.Failed, new AiDescription(null, []), ct);
             return;
         }
 
+        // The household's keywords so far, so the AI reuses them instead of adding near-doubles.
+        IReadOnlyList<string> known = [];
+        if (item.Keywords is null)
+        {
+            var stored = await db.Items.AsNoTracking()
+                .Where(i => i.HouseholdId == item.HouseholdId && i.Keywords != null && i.Keywords != "")
+                .Select(i => i.Keywords).ToListAsync(ct);
+            known = stored.SelectMany(ItemKeywords.Split).GroupBy(k => k)
+                .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => g.Key).Take(AiNamer.MaxKnownKeywords).ToList();
+        }
+
         AiDescription seen;
         try
         {
-            var namer = NamerFactory(household.AiProvider, key.Value!, household.AiModel ?? AiModels.DefaultFor(household.AiProvider));
-            seen = await namer.DescribeAsync(jpeg, ct);
+            var namer = NamerFactory(provider, apiKey, model);
+            seen = await namer.DescribeAsync(jpeg, known, ct);
         }
         catch (AiException ex)
         {
