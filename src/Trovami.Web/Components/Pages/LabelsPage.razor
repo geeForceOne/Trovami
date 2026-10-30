@@ -1,6 +1,7 @@
 @page "/labels"
 @inherits AppPage
 @inject LocationService Locations
+@inject SettingsService Settings
 
 <PageTitle>QR labels · @AppInfo.Name</PageTitle>
 
@@ -23,10 +24,10 @@ else
     <div class="bulk-bar active labels-bar">
         <span>@(_selected.Count == 0 ? "Nothing selected" : Format.Count(_selected.Count, "label", "labels"))</span>
         <div class="segmented" role="radiogroup" aria-label="Label size">
-            <button type="button" class="@(_size == "s" ? "on" : "")" @onclick="@(() => _size = "s")">Small</button>
-            <button type="button" class="@(_size == "m" ? "on" : "")" @onclick="@(() => _size = "m")">Medium</button>
-            <button type="button" class="@(_size == "l" ? "on" : "")" @onclick="@(() => _size = "l")">Large</button>
-            <button type="button" class="@(_size == "dymo" ? "on" : "")" @onclick="@(() => _size = "dymo")" title="Dymo LabelWriter roll 99012, 89 x 36 mm">Dymo 99012</button>
+            <button type="button" class="@(_size == "s" ? "on" : "")" @onclick="@(() => SetSizeAsync("s"))">Small</button>
+            <button type="button" class="@(_size == "m" ? "on" : "")" @onclick="@(() => SetSizeAsync("m"))">Medium</button>
+            <button type="button" class="@(_size == "l" ? "on" : "")" @onclick="@(() => SetSizeAsync("l"))">Large</button>
+            <button type="button" class="@(_size == "dymo" ? "on" : "")" @onclick="@(() => SetSizeAsync("dymo"))" title="Dymo LabelWriter roll 99012, 89 x 36 mm">Dymo 99012</button>
         </div>
         <a class="btn btn-primary @(_selected.Count == 0 ? "disabled" : "")" href="@PrintUrl" target="_blank" aria-disabled="@(_selected.Count == 0 ? "true" : "false")"><Icon Name="print" Size="16" /> @(_size == "dymo" ? "Print labels" : "Print sheet")</a>
         @if (_selected.Count > 0)
@@ -57,6 +58,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         ReloadOnHouseholdChange(LoadAsync);
+        _size = (await Settings.GetAsync(await UserIdAsync(), PageToken)).LabelSize;
         await LoadAsync();
         if (Select is { } id && _tree.Contains(id))
             _selected.Add(id);
@@ -96,6 +98,14 @@ else
             }
         </li>
     };
+
+    // Remembered per user, so the next print starts with the same size.
+    private async Task SetSizeAsync(string size)
+    {
+        if (size == _size) return;
+        _size = size;
+        await Settings.SetLabelSizeAsync(await UserIdAsync(), size, PageToken);
+    }
 
     private void Toggle(Guid id, bool on)
     {

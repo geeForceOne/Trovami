@@ -694,6 +694,11 @@ namespace Trovami.Core.Data.Migrations
                     b.Property<string>("HomepageTokenHash")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("LabelSize")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RegionFormat")
                         .IsRequired()
                         .HasMaxLength(16)

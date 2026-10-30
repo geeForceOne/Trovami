@@ -44,6 +44,9 @@ public sealed class UserSettings
     // SHA-256 (hex) of the user's homepage widget token; the token itself is shown once.
     public string? HomepageTokenHash { get; set; }
     public DateTime? HomepageTokenCreatedAt { get; set; }
+
+    // The QR label size printed last (see SettingsService.LabelSizes), picked again next time.
+    public string LabelSize { get; set; } = "m";
 }
 
 // Rows the phone keeps a copy of (locations and tags). Version comes from one counter for the whole database
