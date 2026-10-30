@@ -1,7 +1,7 @@
 @* An item in a grid: its photo, name and quantity; opens the item. Select shows a checkbox for
    picking several (the Inbox). *@
 <div class="item-card @(Selected ? "selected" : "")">
-    <a class="item-link" href="@($"i/{Item.Id}")">
+    <a class="item-link" href="@($"i/{Item.ShortCode}")">
         <span class="item-photo">
             @if (Item.PhotoVersion is { } v)
             {

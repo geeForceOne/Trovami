@@ -1,4 +1,5 @@
 using Trovami.Core.Models;
+using Trovami.Core.Services;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -116,6 +117,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             e.Property(x => x.Color).HasMaxLength(16);
             e.Property(x => x.Label).HasMaxLength(Location.MaxLabelLength);
             e.Property(x => x.PhotoVersion).HasMaxLength(16);
+            e.Property(x => x.ShortCode).HasMaxLength(ShortCodes.Length);
+            e.HasIndex(x => x.ShortCode).IsUnique();
             e.HasIndex(x => new { x.HouseholdId, x.ParentId });
             e.HasIndex(x => x.Version);
             e.HasQueryFilter(x => x.DeletedAt == null);
@@ -131,6 +134,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             e.Property(x => x.AiNaming).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Notes).HasMaxLength(Item.MaxNotesLength);
             e.Property(x => x.PhotoVersion).HasMaxLength(16);
+            e.Property(x => x.ShortCode).HasMaxLength(ShortCodes.Length);
+            e.HasIndex(x => x.ShortCode).IsUnique();
             e.HasIndex(x => new { x.HouseholdId, x.LocationId });
             e.HasIndex(x => x.AiNaming);
         });

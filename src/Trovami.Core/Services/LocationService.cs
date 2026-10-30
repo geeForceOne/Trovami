@@ -7,7 +7,7 @@ namespace Trovami.Core.Services;
 
 // One location as the tree shows it. Items counts only what's directly in it.
 public sealed record LocationNode(
-    Guid Id, Guid? ParentId, string Name, LocationKind Kind, string? Color, string? Label, string? Notes,
+    Guid Id, string ShortCode, Guid? ParentId, string Name, LocationKind Kind, string? Color, string? Label, string? Notes,
     string? PhotoVersion, int Items, int Tags);
 
 public sealed record LocationUpdate(string Name, LocationKind Kind, string? Notes, string? Color, string? Label);
@@ -32,7 +32,7 @@ public sealed class LocationService(IDbContextFactory<AppDbContext> dbFactory, P
             .GroupBy(t => t.LocationId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
         var rows = await db.Locations.AsNoTracking().Where(l => l.HouseholdId == householdId).ToListAsync(ct);
         return new LocationTree(rows.Select(l => new LocationNode(
-            l.Id, l.ParentId, l.Name, l.Kind, l.Color, l.Label, l.Notes, l.PhotoVersion,
+            l.Id, l.ShortCode, l.ParentId, l.Name, l.Kind, l.Color, l.Label, l.Notes, l.PhotoVersion,
             items.GetValueOrDefault(l.Id), tags.GetValueOrDefault(l.Id))));
     }
 
@@ -51,7 +51,9 @@ public sealed class LocationService(IDbContextFactory<AppDbContext> dbFactory, P
         }
         if (parentId is { } p && !await db.Locations.AnyAsync(l => l.Id == p && l.HouseholdId == householdId, ct))
             throw new NotFoundException("The location to add it to no longer exists.");
-        var location = new Location { Id = id ?? Guid.NewGuid(), HouseholdId = householdId, ParentId = parentId, Name = clean, Kind = kind };
+        // Deleted locations keep their code, so links to them don't point somewhere else later.
+        var code = await ShortCodes.NewUniqueAsync(c => db.Locations.IgnoreQueryFilters().AnyAsync(l => l.ShortCode == c, ct));
+        var location = new Location { Id = id ?? Guid.NewGuid(), ShortCode = code, HouseholdId = householdId, ParentId = parentId, Name = clean, Kind = kind };
         db.Locations.Add(location);
         await db.SaveChangesAsync(ct);
         return location.Id;
@@ -175,11 +177,13 @@ public sealed class LocationTree
     public const string Separator = " › ";
 
     private readonly Dictionary<Guid, LocationNode> _byId;
+    private readonly Dictionary<string, LocationNode> _byCode;
     private readonly ILookup<Guid?, LocationNode> _children;
 
     public LocationTree(IEnumerable<LocationNode> nodes)
     {
         _byId = nodes.ToDictionary(n => n.Id);
+        _byCode = _byId.Values.Where(n => n.ShortCode.Length > 0).ToDictionary(n => n.ShortCode);
         _children = _byId.Values
             .OrderBy(n => n.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToLookup(n => n.ParentId is { } p && _byId.ContainsKey(p) ? p : (Guid?)null);
@@ -192,6 +196,9 @@ public sealed class LocationTree
     public bool Contains(Guid id) => _byId.ContainsKey(id);
 
     public LocationNode? Find(Guid? id) => id is { } i && _byId.TryGetValue(i, out var n) ? n : null;
+
+    public LocationNode? FindByCode(string? code) =>
+        ShortCodes.Normalize(code) is { } c && _byCode.TryGetValue(c, out var n) ? n : null;
 
     // Sorted by name; null: the top level.
     public IEnumerable<LocationNode> ChildrenOf(Guid? id) => _children[id];

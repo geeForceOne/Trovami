@@ -1,0 +1,123 @@
+@inject NavigationManager Nav
+
+@* The table view of a location's items: everything in it and below it, sortable and filtered as
+   you type. "Where" is the path below the location, empty for what's directly in it. *@
+@{ var shown = Rows(); }
+<div class="item-table-tools">
+    <input class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter items" autocomplete="off" spellcheck="false" />
+    <label class="check">
+        <input type="checkbox" @bind="_directOnly" /> Only directly here
+    </label>
+    <span class="muted small">@Summary(shown.Count)</span>
+</div>
+
+@if (shown.Count > 0)
+{
+    <div class="table-scroll">
+        <table class="table item-table">
+            <thead>
+                <tr>
+                    <th class="item-table-photo"><span class="visually-hidden">Photo</span></th>
+                    @SortHeader("Name", Column.Name)
+                    @SortHeader("Qty", Column.Quantity, numeric: true)
+                    @SortHeader("Where", Column.Where)
+                    @SortHeader("Added", Column.Added)
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var (item, where) in shown)
+                {
+                    <tr @key="item.Id" class="clickable" @onclick="() => Nav.NavigateTo(Link(item))">
+                        <td class="item-table-photo">
+                            @if (item.PhotoVersion is { } v)
+                            {
+                                <img src="@Format.ItemPhoto(item.Id, v)" alt="" loading="lazy" />
+                            }
+                            else
+                            {
+                                <span class="item-table-nophoto"><Icon Name="image" Size="16" /></span>
+                            }
+                        </td>
+                        <td data-label="Name" class="item-table-name">
+                            <a href="@Link(item)" class="@(item.Name is null ? "muted" : "")" @onclick:stopPropagation="true">@(item.Naming ? "Naming…" : item.ShownName)</a>
+                        </td>
+                        <td data-label="Qty" class="num">@Format.Number(item.Quantity)</td>
+                        <td data-label="Where">@where</td>
+                        <td data-label="Added" class="nowrap">@Format.Ago(item.CreatedAt)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (Items.Count > 0)
+{
+    <p class="muted">No item matches.</p>
+}
+
+@code {
+    // Everything in the location and below it.
+    [Parameter, EditorRequired] public IReadOnlyList<ItemView> Items { get; set; } = [];
+    [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid LocationId { get; set; }
+
+    private enum Column { Name, Quantity, Where, Added }
+
+    private string _filter = "";
+    private bool _directOnly;
+    private Column _sort = Column.Name;
+    private bool _descending;
+
+    private string Summary(int shown) => shown == Items.Count
+        ? Format.Count(Items.Count, "item", "items")
+        : $"{Format.Number(shown)} of {Format.Count(Items.Count, "item", "items")}";
+
+    private static string Link(ItemView item) => $"i/{item.ShortCode}";
+
+    private List<(ItemView Item, string Where)> Rows()
+    {
+        var words = Search.Words(_filter);
+        var rows = Items
+            .Where(i => !_directOnly || i.LocationId == LocationId)
+            .Select(i => (Item: i, Where: Where(i)))
+            .Where(x => words.Count == 0 || words.All(Search.Normalize($"{x.Item.ShownName} {x.Item.Notes} {x.Where}").Contains));
+        Func<(ItemView Item, string Where), object> key = _sort switch
+        {
+            Column.Quantity => x => x.Item.Quantity,
+            Column.Where => x => x.Where,
+            Column.Added => x => x.Item.CreatedAt,
+            _ => x => x.Item.ShownName,
+        };
+        var comparer = Comparer<object>.Create((a, b) => a is string sa && b is string sb
+            ? StringComparer.CurrentCultureIgnoreCase.Compare(sa, sb)
+            : Comparer<object>.Default.Compare(a, b));
+        return (_descending ? rows.OrderByDescending(key, comparer) : rows.OrderBy(key, comparer)).ToList();
+    }
+
+    // The path below the picked location; empty for what's directly in it.
+    private string Where(ItemView item) =>
+        item.LocationId is { } id && id != LocationId
+            ? string.Join(LocationTree.Separator, Tree.Ancestry(id).SkipWhile(n => n.Id != LocationId).Skip(1).Select(n => n.Name))
+            : "";
+
+    // Clicking the current column flips the order; a new one starts A to Z, or largest and newest first.
+    private void SortBy(Column column)
+    {
+        _descending = column == _sort ? !_descending : column is Column.Quantity or Column.Added;
+        _sort = column;
+    }
+
+    private RenderFragment SortHeader(string label, Column column, bool numeric = false) =>
+        @<th class="@(numeric ? "num" : "")" aria-sort="@(_sort != column ? "none" : _descending ? "descending" : "ascending")">
+            <button type="button" class="sort-button" @onclick="() => SortBy(column)">
+                @if (numeric)
+                {
+                    <span class="sort-mark" aria-hidden="true">@(_sort != column ? "" : _descending ? "▾ " : "▴ ")</span>@label
+                }
+                else
+                {
+                    @label<span class="sort-mark" aria-hidden="true">@(_sort != column ? "" : _descending ? " ▾" : " ▴")</span>
+                }
+            </button>
+        </th>;
+}

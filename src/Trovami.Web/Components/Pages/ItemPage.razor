@@ -1,4 +1,4 @@
-@page "/i/{Id:guid}"
+@page "/i/{Key}"
 @inherits AppPage
 @inject ItemService Items
 @inject LocationService Locations
@@ -20,7 +20,7 @@ else
             @foreach (var a in _tree.Ancestry(loc))
             {
                 <span class="path-sep">›</span>
-                <a href="@($"l/{a.Id}")">@a.Name</a>
+                <a href="@($"l/{a.ShortCode}")">@a.Name</a>
             }
         }
         else
@@ -101,7 +101,10 @@ else
 }
 
 @code {
-    [Parameter] public Guid Id { get; set; }
+    // The item's short code; an old /i/<guid> link is taken there too.
+    [Parameter] public string Key { get; set; } = "";
+
+    private Guid Id => _item?.Id ?? Guid.Empty;
 
     private ItemView? _item;
     private bool _missing;
@@ -125,7 +128,11 @@ else
         try
         {
             var wasNaming = _item?.Naming == true;
-            _item = await Items.GetAsync(userId, Id, PageToken);
+            _item = _item is { } shown && shown.ShortCode == Key ? await Items.GetAsync(userId, shown.Id, PageToken)
+                : Guid.TryParse(Key, out var id) ? await Items.GetAsync(userId, id, PageToken)
+                : await Items.GetByCodeAsync(userId, Key, PageToken);
+            if (Key != _item.ShortCode)
+                Nav.NavigateTo($"i/{_item.ShortCode}", replace: true);
             _tree = await Locations.TreeAsync(userId, _item.HouseholdId, PageToken);
             // The AI's name arrives while the page is open; show it unless the person is typing.
             if (wasNaming && !_item.Naming && string.IsNullOrWhiteSpace(_name))
@@ -204,7 +211,7 @@ else
     {
         if (_item is null || !await Ui.Confirm.AskAsync($"Delete {_item.ShownName}?", "The item and its photo are removed for everyone in the household.", "Delete", danger: true))
             return;
-        var back = _item.LocationId is { } l ? $"l/{l}" : "inbox";
+        var back = _tree.Find(_item.LocationId) is { } l ? $"l/{l.ShortCode}" : "inbox";
         if (await RunAsync(async () => await Items.DeleteAsync(await UserIdAsync(), [Id], PageToken)))
         {
             await Ui.RefreshAsync();

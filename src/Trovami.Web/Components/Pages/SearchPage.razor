@@ -22,7 +22,7 @@
                 @foreach (var loc in _result.Locations)
                 {
                     <li>
-                        <a class="hit" href="@($"l/{loc.Id}")" style="@Format.ColorVar(loc.Color)">
+                        <a class="hit" href="@($"l/{loc.ShortCode}")" style="@Format.ColorVar(loc.Color)">
                             <span class="loc-icon @(loc.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(loc.Kind)" Size="18" /></span>
                             <span class="hit-text">
                                 <span class="hit-name">@loc.Name @if (loc.Label is not null) {<span class="label-chip">@loc.Label</span>}</span>
@@ -43,7 +43,7 @@
                 @foreach (var item in _result.Items)
                 {
                     <li>
-                        <a class="hit" href="@($"i/{item.Id}")">
+                        <a class="hit" href="@($"i/{item.ShortCode}")">
                             <span class="hit-photo">
                                 @if (item.PhotoVersion is { } v)
                                 {

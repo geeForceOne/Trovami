@@ -470,6 +470,11 @@ namespace Trovami.Core.Data.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ShortCode")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -480,6 +485,9 @@ namespace Trovami.Core.Data.Migrations
                     b.HasIndex("CreatedById");
 
                     b.HasIndex("LocationId");
+
+                    b.HasIndex("ShortCode")
+                        .IsUnique();
 
                     b.HasIndex("HouseholdId", "LocationId");
 
@@ -530,6 +538,11 @@ namespace Trovami.Core.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ShortCode")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -539,6 +552,9 @@ namespace Trovami.Core.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ParentId");
+
+                    b.HasIndex("ShortCode")
+                        .IsUnique();
 
                     b.HasIndex("Version");
 

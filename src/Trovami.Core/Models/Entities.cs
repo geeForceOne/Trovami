@@ -109,6 +109,9 @@ public sealed class Location : ISynced
 
     // Created on the phone too (linking a tag offline), so the client picks the id.
     public Guid Id { get; set; } = Guid.NewGuid();
+
+    // For the web app's addresses (see ShortCodes); given by the server.
+    public string ShortCode { get; set; } = "";
     public Guid HouseholdId { get; set; }
     public Guid? ParentId { get; set; }
     public string Name { get; set; } = "";
@@ -141,6 +144,9 @@ public sealed class Item
     // Created on the phone, possibly offline, so the client picks the id; uploading it twice is
     // harmless.
     public Guid Id { get; set; } = Guid.NewGuid();
+
+    // For the web app's addresses (see ShortCodes); given by the server.
+    public string ShortCode { get; set; } = "";
     public Guid HouseholdId { get; set; }
     public Guid? LocationId { get; set; }
 

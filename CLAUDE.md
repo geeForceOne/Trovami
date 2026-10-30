@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Trovami ("find me") is a multi-user, Docker-hosted household inventory. Things are stored all over a place (a house, a cellar, a holiday flat); Trovami records where each one is, so it can be found again. It has two clients: a Blazor web app for organizing and finding things, and an Android app for adding things fast. It follows the architecture and patterns of its siblings LaLira (D:\Programming\LaLira) and Recall (D:\Programming\LearningPortal) and reuses their user handling, backups and release setup.
+Trovami ("find me") is a multi-user, Docker-hosted household inventory. Things are stored all over a place (a house, a cellar, a holiday flat); Trovami records where each one is, so it can be found again. It has two clients: a Blazor web app for organizing and finding things, and an Android app for adding things fast. Its user handling, backups and release setup came from the sibling apps LaLira and Recall; everything needed now lives in this repository, so work from its own code.
 
 - **Simplicity is key.** Adding must be fast: scan a tag, take a photo, save, done. Prefer inline, fast flows over dialogs and extra steps, in both apps.
 - **Households.** All locations and items belong to a household. Any user can create households and invite others into them by email: an address with an account gets a household invite to accept, a new address gets an account invite (the admin can turn this off, so that only the admin creates accounts). A user can be in several households and switches between them. The creator is the household's **owner** (manages members, the AI key, can delete the household); members see and edit everything in it.
@@ -84,6 +84,7 @@ Latest .NET (currently .NET 10, `net10.0`), Blazor Server, `.slnx` solution, plu
 - **Logo.** Animated like LaLira's and Recall's: the header logo plays a motion on hover, the sign-in logo on load, the busy indicator loops. Small sizes get thicker lines and the favicon its own simplified drawing. Nothing moves under `prefers-reduced-motion`.
 - **Dates and times are entered in the region format**: use `DateField` / `TimeField`, never a bare `<input type="date">` or `type="time"`.
 - **Table cells are never `display: flex`** (it breaks the row lines); put a `<div class="row-actions">` inside the cell.
+- **IDs are GUIDs, addresses use short codes.** Locations and items keep GUID ids (the phone creates them offline), but the web app links to them by their six-character `ShortCode` (`/l/K7F3QZ`, `/i/M2X9TA`), given by the server on creation. Old `/l/<guid>` and `/i/<guid>` links redirect.
 - **Migrations are never regenerated or edited once they exist**, not even before the first release: the user's local `./data` database records them by ID. A schema change is always a new migration.
 - **Gotcha:** numbers written into SVG attributes must use the invariant culture.
 - **Gotcha:** a component callback passed as a plain `Func<...>` (not EventCallback) doesn't re-render the parent; call StateHasChanged after it changes state.

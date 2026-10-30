@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Trovami.Core.Services;
 
 public sealed record ItemView(
-    Guid Id, Guid HouseholdId, string? Name, NameSource NameSource, AiNaming AiNaming, string? Notes, int Quantity,
+    Guid Id, string ShortCode, Guid HouseholdId, string? Name, NameSource NameSource, AiNaming AiNaming, string? Notes, int Quantity,
     Guid? LocationId, string Path, string? PhotoVersion, bool PhotoExpected, DateTime CreatedAt)
 {
     public const string UnnamedText = "Unnamed item";
@@ -40,6 +40,19 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             .ThenByDescending(i => i.CreatedAt).ToList();
     }
 
+    // Everything in a location and in all the locations below it, in no particular order.
+    public async Task<IReadOnlyList<ItemView>> BelowAsync(string userId, Guid householdId, Guid locationId, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var tree = await LocationService.LoadTreeAsync(db, householdId, ct);
+        var ids = tree.Subtree(locationId).Select(n => (Guid?)n.Id).ToList();
+        var rows = await db.Items.AsNoTracking()
+            .Where(i => i.HouseholdId == householdId && ids.Contains(i.LocationId))
+            .ToListAsync(ct);
+        return rows.Select(i => View(i, tree)).ToList();
+    }
+
     // The Inbox: items without a location, newest first.
     public async Task<IReadOnlyList<ItemView>> InboxAsync(string userId, Guid householdId, CancellationToken ct = default)
     {
@@ -66,6 +79,17 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         return View(item, await LocationService.LoadTreeAsync(db, item.HouseholdId, ct));
     }
 
+    // By the short code in the web app's address.
+    public async Task<ItemView> GetByCodeAsync(string userId, string code, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var clean = ShortCodes.Normalize(code);
+        var id = await db.Items.Where(i => i.ShortCode == clean).Select(i => (Guid?)i.Id).FirstOrDefaultAsync(ct)
+            ?? throw new NotFoundException("That item no longer exists.");
+        var item = await LoadAsync(db, userId, id, ct);
+        return View(item, await LocationService.LoadTreeAsync(db, item.HouseholdId, ct));
+    }
+
     // Creating the same id twice returns false and changes nothing, so the phone can repeat an
     // upload that may or may not have arrived.
     public async Task<bool> CreateAsync(string userId, Guid householdId, ItemCreate create, CancellationToken ct = default)
@@ -86,6 +110,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         db.Items.Add(new Item
         {
             Id = create.Id,
+            ShortCode = await ShortCodes.NewUniqueAsync(c => db.Items.AnyAsync(i => i.ShortCode == c, ct)),
             HouseholdId = householdId,
             LocationId = locationId,
             Name = name,
@@ -251,7 +276,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
     }
 
     internal static ItemView View(Item i, LocationTree tree) =>
-        new(i.Id, i.HouseholdId, i.Name, i.NameSource, i.AiNaming, i.Notes, i.Quantity, i.LocationId, tree.PathOf(i.LocationId),
+        new(i.Id, i.ShortCode, i.HouseholdId, i.Name, i.NameSource, i.AiNaming, i.Notes, i.Quantity, i.LocationId, tree.PathOf(i.LocationId),
             i.PhotoVersion, i.PhotoExpected, i.CreatedAt);
 
     private static string? CleanName(string? name)

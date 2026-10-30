@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Trovami.Core.Data;
 using Trovami.Core.Models;
 using Microsoft.EntityFrameworkCore;
@@ -16,11 +15,7 @@ public sealed class TagService(IDbContextFactory<AppDbContext> dbFactory)
 {
     public const string UriPrefix = "trovami://t/";
 
-    // Easy to tell apart on paper: no 0/O, 1/I/L.
-    private const string Alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-
-    public static string NewCode() =>
-        new(Enumerable.Range(0, Tag.CodeLength).Select(_ => Alphabet[RandomNumberGenerator.GetInt32(Alphabet.Length)]).ToArray());
+    public static string NewCode() => ShortCodes.New(Tag.CodeLength);
 
     public static string UriOf(string code) => UriPrefix + code;
 

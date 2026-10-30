@@ -1,25 +1,33 @@
-@page "/l/{Id:guid}"
 @inherits AppPage
 @inject LocationService Locations
 @inject ItemService Items
 @inject TagService Tags
+@inject IJSRuntime JS
 
-<PageTitle>@(_node?.Name ?? "Location") · @AppInfo.Name</PageTitle>
-
+@* The right pane of the Locations page: one location's details, items and tags. Locations inside
+   it are in the tree, so they aren't repeated here. Every change tells the page through OnChanged,
+   which reloads the tree and passes it back in. *@
 @if (_node is null)
 {
-    <p class="page-loading">@(_missing ? "This location no longer exists." : "…")</p>
+    <p class="muted">This location no longer exists.</p>
 }
 else
 {
-    <nav class="crumbs path" aria-label="Path">
-        <a href="">Locations</a>
-        @foreach (var a in _tree.Ancestry(_node.Id).SkipLast(1))
-        {
-            <span class="path-sep">›</span>
-            <a href="@($"l/{a.Id}")">@a.Name</a>
-        }
-    </nav>
+    <a class="loc-back" href=""><Icon Name="left" Size="16" /> All locations</a>
+
+    @if (_node.ParentId is not null)
+    {
+        <nav class="crumbs path" aria-label="Path">
+            @foreach (var (a, i) in Tree.Ancestry(_node.Id).SkipLast(1).Select((a, i) => (a, i)))
+            {
+                @if (i > 0)
+                {
+                    <span class="path-sep">›</span>
+                }
+                <a href="@($"l/{a.ShortCode}")">@a.Name</a>
+            }
+        </nav>
+    }
 
     <div class="loc-head" style="@Format.ColorVar(_node.Color)">
         @if (_node.PhotoVersion is { } pv)
@@ -35,7 +43,7 @@ else
             <p class="page-sub">
                 @Format.KindLabel(_node.Kind)
                 @if (_node.Color is not null) {<span>· @LocationColors.LabelOf(_node.Color)</span>}
-                · @Format.Count(_tree.ItemsBelow(_node.Id), "item", "items") inside
+                · @Format.Count(Tree.ItemsBelow(_node.Id), "item", "items") inside
             </p>
         </div>
         <div class="page-actions">
@@ -49,7 +57,7 @@ else
     {
         <div class="inline-panel">
             <span>@($"Move {_node.Name} and everything in it to:")</span>
-            <LocationPicker Tree="_tree" Exclude="_node.Id" Current="_node.ParentId" AutoFocus="true" Placeholder="Pick a location…" OnPick="MoveAsync" />
+            <LocationPicker Tree="Tree" Exclude="_node.Id" Current="_node.ParentId" AutoFocus="true" Placeholder="Pick a location…" OnPick="MoveAsync" />
             @if (_node.ParentId is not null)
             {
                 <button type="button" class="btn btn-ghost btn-sm" @onclick="() => MoveAsync(null)">To the top level</button>
@@ -110,40 +118,29 @@ else
         <p class="loc-notes">@_node.Notes</p>
     }
 
-    @* Sub-locations *@
-    <section class="section">
-        <div class="section-head">
-            <h2>Inside @_node.Name</h2>
-        </div>
-        <div class="loc-children">
-            @foreach (var child in _tree.ChildrenOf(_node.Id))
-            {
-                <a class="loc-card" href="@($"l/{child.Id}")" style="@Format.ColorVar(child.Color)">
-                    <span class="loc-icon @(child.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(child.Kind)" Size="18" /></span>
-                    <span class="loc-card-name">@child.Name</span>
-                    @if (child.Label is not null)
-                    {
-                        <span class="label-chip">@child.Label</span>
-                    }
-                    <span class="loc-card-count">@(_tree.ItemsBelow(child.Id) is > 0 and var n ? Format.Number(n) : "")</span>
-                </a>
-            }
-            <form class="inline-add loc-add" @onsubmit="AddLocationAsync" @onsubmit:preventDefault="true">
-                <KindSelect @bind-Value="_newKind" />
-                <input class="input" @bind="_newName" @bind:event="oninput" placeholder="Add a location inside" maxlength="@Location.MaxNameLength" aria-label="New location name" />
-                <button type="submit" class="btn btn-secondary btn-sm" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName))"><Icon Name="plus" Size="16" /> Add</button>
-            </form>
-        </div>
-    </section>
-
     @* Items *@
     <section class="section">
         <div class="section-head">
-            <h2>Items <span class="count">@(_items.Count > 0 ? Format.Number(_items.Count) : "")</span></h2>
+            <h2>Items @if (_items.Count > 0) {<span class="count">@Format.Number(_items.Count)</span>}</h2>
+            <div class="segmented" role="radiogroup" aria-label="Show items as">
+                <button type="button" role="radio" class="@(_table ? "" : "on")" aria-checked="@(_table ? "false" : "true")" @onclick="() => SetViewAsync(table: false)"><Icon Name="image" Size="16" /> Photos</button>
+                <button type="button" role="radio" class="@(_table ? "on" : "")" aria-checked="@(_table ? "true" : "false")" @onclick="() => SetViewAsync(table: true)"><Icon Name="list" Size="16" /> Table</button>
+            </div>
         </div>
-        <ItemAdd LocationId="_node.Id" OnAdded="LoadAsync" />
-        <NamingWatcher Active="_items.Any(i => i.Naming)" OnTick="LoadAsync" />
-        @if (_items.Count > 0)
+        <ItemAdd LocationId="_node.Id" OnAdded="OnChanged" />
+        <NamingWatcher Active="(_table ? _below : _items).Any(i => i.Naming)" OnTick="LoadAsync" />
+        @if (_table)
+        {
+            @if (_below.Count > 0)
+            {
+                <ItemTable Items="_below" Tree="Tree" LocationId="_node.Id" />
+            }
+            else
+            {
+                <p class="muted">Nothing here yet. Add items above, or scan this location's tag with the phone app.</p>
+            }
+        }
+        else if (_items.Count > 0)
         {
             <div class="item-grid">
                 @foreach (var item in _items)
@@ -187,18 +184,24 @@ else
 }
 
 @code {
-    [Parameter] public Guid Id { get; set; }
+    [Parameter, EditorRequired] public Guid Id { get; set; }
+    [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
 
-    private LocationTree _tree = new([]);
+    // Something changed that the tree shows (name, counts, place): the page reloads the tree.
+    [Parameter] public EventCallback OnChanged { get; set; }
+
     private LocationNode? _node;
-    private bool _missing;
+    private Guid _shownId;
     private IReadOnlyList<ItemView> _items = [];
+
+    // The table view shows everything below the location too; the browser remembers the choice.
+    private const string ViewPref = "itemView";
+    private bool _table;
+    private IReadOnlyList<ItemView> _below = [];
     private IReadOnlyList<TagView> _tags = [];
     private bool _editing;
     private bool _moving;
     private EditModel _edit = new();
-    private string _newName = "";
-    private LocationKind _newKind = LocationKind.Box;
 
     private sealed class EditModel
     {
@@ -209,27 +212,44 @@ else
         public string? Notes { get; set; }
     }
 
-    protected override void OnInitialized() => ReloadOnHouseholdChange(LoadAsync);
-
+    // Runs when another location is picked and whenever the page passes in a reloaded tree.
     protected override async Task OnParametersSetAsync()
     {
-        _editing = _moving = false;
+        if (Id != _shownId)
+        {
+            _shownId = Id;
+            _editing = _moving = false;
+        }
         await LoadAsync();
     }
 
     private async Task LoadAsync()
     {
-        if (Household is null)
+        _node = Tree.Find(Id);
+        if (_node is null || Household is null)
             return;
         var userId = await UserIdAsync();
-        _tree = await Locations.TreeAsync(userId, Household.Id, PageToken);
-        _node = _tree.Find(Id);
-        _missing = _node is null;
-        if (_node is null)
-            return;
-        _newKind = KindSelect.ChildKind(_node.Kind);
         _items = await Items.AtLocationAsync(userId, Household.Id, Id, PageToken);
+        _below = _table ? await Items.BelowAsync(userId, Household.Id, Id, PageToken) : [];
         _tags = await Tags.ForLocationAsync(userId, Id, PageToken);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && await JS.InvokeAsync<string?>("trovami.getPref", ViewPref) == "table")
+        {
+            _table = true;
+            await LoadAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetViewAsync(bool table)
+    {
+        if (_table == table) return;
+        _table = table;
+        await JS.InvokeVoidAsync("trovami.setPref", ViewPref, table ? "table" : "photos");
+        await LoadAsync();
     }
 
     private void StartEdit()
@@ -244,30 +264,27 @@ else
         if (await RunAsync(async () =>
         {
             await Locations.UpdateAsync(await UserIdAsync(), Id, new LocationUpdate(_edit.Name, _edit.Kind, _edit.Notes, _edit.Color, _edit.Label), PageToken);
-            await LoadAsync();
-        }))
             _editing = false;
+        }))
+            await OnChanged.InvokeAsync();
     }
 
     private async Task MoveAsync(Guid? parentId)
     {
-        if (await RunAsync(async () =>
-        {
-            await Locations.MoveAsync(await UserIdAsync(), Id, parentId, PageToken);
-            await LoadAsync();
-        }))
+        if (await RunAsync(async () => await Locations.MoveAsync(await UserIdAsync(), Id, parentId, PageToken)))
         {
             _moving = false;
-            Ui.Toast.Success($"Moved to {_tree.PathOf(parentId) switch { "Inbox" => "the top level", var p => p }}.");
+            await OnChanged.InvokeAsync();
+            Ui.Toast.Success($"Moved to {(parentId is null ? "the top level" : Tree.PathOf(parentId))}.");
         }
     }
 
     private async Task DeleteAsync()
     {
         if (_node is null) return;
-        var children = _tree.ChildrenOf(Id).Count();
+        var children = Tree.ChildrenOf(Id).Count();
         var empty = children == 0 && _items.Count == 0;
-        var up = _node.ParentId is null ? "the top level (items go to the Inbox)" : _tree.PathOf(_node.ParentId);
+        var up = _node.ParentId is null ? "the top level (items go to the Inbox)" : Tree.PathOf(_node.ParentId);
         var ok = await Ui.Confirm.AskAsync($"Delete {_node.Name}?",
             empty ? "It's empty, so nothing else changes." + (_tags.Count > 0 ? " Its tags are unlinked." : "")
                   : $"What's in it ({Format.Count(children, "location", "locations")}, {Format.Count(_items.Count, "item", "items")}) moves up to {up}. Its tags are unlinked.",
@@ -277,38 +294,24 @@ else
         if (await RunAsync(async () => await Locations.DeleteAsync(await UserIdAsync(), Id, moveContents: true, PageToken)))
         {
             await Ui.RefreshAsync();
-            Nav.NavigateTo(parent is { } p ? $"l/{p}" : "");
+            Nav.NavigateTo(Tree.Find(parent) is { } p ? $"l/{p.ShortCode}" : "");
         }
-    }
-
-    private async Task AddLocationAsync()
-    {
-        if (Household is null || string.IsNullOrWhiteSpace(_newName)) return;
-        await RunAsync(async () =>
-        {
-            await Locations.CreateAsync(await UserIdAsync(), Household.Id, Id, _newName, _newKind, ct: PageToken);
-            _newName = "";
-            await LoadAsync();
-        });
     }
 
     private async Task SetPhotoAsync(IBrowserFile file)
     {
-        await RunAsync(async () =>
+        if (await RunAsync(async () =>
         {
             await using var stream = file.OpenReadStream(Trovami.Core.Photos.PhotoStore.MaxUploadBytes, PageToken);
             await Locations.SetPhotoAsync(await UserIdAsync(), Id, stream, PageToken);
-            await LoadAsync();
-        });
+        }))
+            await OnChanged.InvokeAsync();
     }
 
     private async Task RemovePhotoAsync()
     {
-        await RunAsync(async () =>
-        {
-            await Locations.RemovePhotoAsync(await UserIdAsync(), Id, PageToken);
-            await LoadAsync();
-        });
+        if (await RunAsync(async () => await Locations.RemovePhotoAsync(await UserIdAsync(), Id, PageToken)))
+            await OnChanged.InvokeAsync();
     }
 
     private async Task UnlinkAsync(TagView tag)
@@ -316,10 +319,7 @@ else
         if (!await Ui.Confirm.AskAsync("Unlink this tag?",
                 tag.Kind == TagKind.Nfc ? "Scanning it then asks for a location again, so it can be used elsewhere." : "The printed label stops working.", "Unlink"))
             return;
-        await RunAsync(async () =>
-        {
-            await Tags.UnlinkAsync(await UserIdAsync(), tag.Code, PageToken);
-            await LoadAsync();
-        });
+        if (await RunAsync(async () => await Tags.UnlinkAsync(await UserIdAsync(), tag.Code, PageToken)))
+            await OnChanged.InvokeAsync();
     }
 }

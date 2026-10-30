@@ -1,0 +1,246 @@
+@page "/"
+@page "/l/{Key}"
+@inherits AppPage
+@inject HouseholdService Households
+@inject LocationService Locations
+
+@* The location tree on the left and the picked location on the right. Both routes use this one
+   page, so the tree keeps what's open while moving between locations. On phones it's one
+   column: the tree, or the picked location with a way back. *@
+<PageTitle>@(Id is not null && _tree.Find(Id) is { } shown ? shown.Name : "Locations") · @AppInfo.Name</PageTitle>
+
+@if (!_loaded)
+{
+    <p class="page-loading">…</p>
+}
+else if (Household is null)
+{
+    <div class="welcome">
+        <BrandMark Size="72" PlayOnLoad="true" />
+        <h1>@($"Welcome to {AppInfo.Name}")</h1>
+        <p class="page-sub">Everything you store belongs to a household: your home, a cellar, a holiday flat. Start with one; you can invite others into it later.</p>
+        <form class="inline-add" @onsubmit="CreateHouseholdAsync" @onsubmit:preventDefault="true">
+            <input class="input input-lg" @bind="_householdName" @bind:event="oninput" placeholder="Name, e.g. Home" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
+            <button type="submit" class="btn btn-primary btn-lg" disabled="@(Busy || string.IsNullOrWhiteSpace(_householdName))">Create household</button>
+        </form>
+        @if (Ui.Invites.Count > 0)
+        {
+            <p class="muted">Or accept an invite above.</p>
+        }
+    </div>
+}
+else
+{
+    <div class="loc-split @(Id is null ? "" : "has-selection")">
+        <aside class="loc-nav" aria-label="Locations">
+            <div class="loc-nav-head">
+                <h1>Locations</h1>
+                @if (_tree.Count > 0)
+                {
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="ToggleAll">@(_expanded.Count > 0 ? "Collapse all" : "Expand all")</button>
+                }
+            </div>
+            @if (_tree.Count > 0)
+            {
+                <ul class="tree" role="tree">
+                    @foreach (var node in _tree.ChildrenOf(null))
+                    {
+                        @RenderNode(node)
+                    }
+                </ul>
+            }
+            <button type="button" class="btn btn-secondary loc-new" @onclick="NewLocationAsync"><Icon Name="plus" Size="16" /> New location</button>
+        </aside>
+
+        <section class="loc-pane">
+            @if (Id is { } id)
+            {
+                <LocationDetail Id="id" Tree="_tree" OnChanged="ReloadAsync" />
+            }
+            else
+            {
+                <div class="page-head">
+                    <div>
+                        <h2>@Household.Name</h2>
+                        <p class="page-sub">@(_tree.Count == 0 ? $"Where things are stored in {Household.Name}." : $"{Format.Count(_tree.Count, "location", "locations")} and {Format.Count(_tree.All.Sum(n => n.Items), "item", "items")}.")</p>
+                    </div>
+                </div>
+                @if (Ui.InboxCount > 0)
+                {
+                    <a class="inbox-strip" href="inbox">
+                        <Icon Name="inbox" />
+                        <span>@($"{Format.Count(Ui.InboxCount, "item waits", "items wait")} in the Inbox for a location.")</span>
+                        <Icon Name="right" Size="16" />
+                    </a>
+                }
+                <div class="empty">
+                    @if (_tree.Count == 0)
+                    {
+                        <Icon Name="house" Size="32" />
+                        <p>Start with the place itself, like "House" or "Apartment". Rooms, closets and boxes go inside it.</p>
+                        <button type="button" class="btn btn-primary" @onclick="NewLocationAsync"><Icon Name="plus" Size="16" /> New location</button>
+                    }
+                    else
+                    {
+                        <Icon Name="left" Size="32" />
+                        <p>Pick a location to see what's in it and to add items.</p>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+}
+
+<NewLocationDialog @ref="_newDialog" />
+
+@code {
+    // The picked location's short code; an old /l/<guid> link is taken there too.
+    [Parameter] public string? Key { get; set; }
+
+    // Guid.Empty for a code that isn't in the tree: the pane says it no longer exists.
+    private Guid? Id => Key is null ? null
+        : Guid.TryParse(Key, out var id) ? id
+        : _tree.FindByCode(Key)?.Id ?? Guid.Empty;
+
+    private bool _loaded;
+    private string _householdName = "Home";
+    private LocationTree _tree = new([]);
+    private readonly HashSet<Guid> _expanded = [];
+    private NewLocationDialog _newDialog = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReloadOnHouseholdChange(async () =>
+        {
+            await ReloadAsync();
+            // Switched to another household: the picked location isn't in it.
+            if (Id is { } id && !_tree.Contains(id))
+                Nav.NavigateTo("");
+        });
+        await ReloadAsync();
+        // The first two levels open, so the rooms show right away.
+        foreach (var top in _tree.ChildrenOf(null))
+            _expanded.Add(top.Id);
+        _loaded = true;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (Key is not null && (_tree.Find(Id) is { } node) && node.ShortCode != Key)
+            Nav.NavigateTo($"l/{node.ShortCode}", replace: true);
+        OpenToSelected();
+    }
+
+    // The picked location stays in sight: the way to it is open, also after it moved.
+    private void OpenToSelected()
+    {
+        if (Id is { } id && _tree.Contains(id))
+            foreach (var a in _tree.Ancestry(id))
+                _expanded.Add(a.Id);
+    }
+
+    private async Task ReloadAsync()
+    {
+        _tree = Household is { } h ? await Locations.TreeAsync(await UserIdAsync(), h.Id, PageToken) : new([]);
+        OpenToSelected();
+    }
+
+    private RenderFragment RenderNode(LocationNode node) => __builder =>
+    {
+        var children = _tree.ChildrenOf(node.Id).ToList();
+        var open = _expanded.Contains(node.Id);
+        var selected = node.Id == Id;
+        var below = _tree.ItemsBelow(node.Id);
+        <li role="treeitem" aria-selected="@(selected ? "true" : "false")" aria-expanded="@(children.Count > 0 ? (open ? "true" : "false") : null)">
+            <div class="tree-row @(selected ? "on" : "")" style="@Format.ColorVar(node.Color)">
+                @if (children.Count > 0)
+                {
+                    <button type="button" class="tree-toggle" aria-label="@(open ? "Collapse" : "Expand")" @onclick="() => Toggle(node.Id)">
+                        <Icon Name="@(open ? "down" : "right")" Size="14" />
+                    </button>
+                }
+                else
+                {
+                    <span class="tree-toggle"></span>
+                }
+                <a class="tree-link" href="@($"l/{node.ShortCode}")" aria-current="@(selected ? "page" : null)">
+                    <span class="loc-icon @(node.Color is null ? "" : "colored")"><Icon Name="@Format.KindIcon(node.Kind)" Size="18" /></span>
+                    <span class="tree-name">@node.Name</span>
+                    @if (node.Label is not null)
+                    {
+                        <span class="label-chip">@node.Label</span>
+                    }
+                    @if (node.Tags > 0)
+                    {
+                        <span class="tree-tag" title="@Format.Count(node.Tags, "tag", "tags")"><Icon Name="tag" Size="14" /></span>
+                    }
+                </a>
+                <span class="tree-count">@(below > 0 ? Format.Number(below) : "")</span>
+            </div>
+            @if (open && children.Count > 0)
+            {
+                <ul role="group">
+                    @foreach (var child in children)
+                    {
+                        @RenderNode(child)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    private void Toggle(Guid id)
+    {
+        if (!_expanded.Remove(id))
+            _expanded.Add(id);
+    }
+
+    private void ToggleAll()
+    {
+        if (_expanded.Count > 0)
+            _expanded.Clear();
+        else
+            foreach (var n in _tree.All.Where(n => _tree.ChildrenOf(n.Id).Any()))
+                _expanded.Add(n.Id);
+    }
+
+    // New locations go inside the one that's picked; the dialog can change that.
+    private async Task NewLocationAsync()
+    {
+        if (Household is null) return;
+        var parent = Id is { } id && _tree.Contains(id) ? id : (Guid?)null;
+        var created = await _newDialog.AskAsync(() => _tree, parent, CreateAsync);
+        if (_tree.Find(created) is { } node)
+            Nav.NavigateTo($"l/{node.ShortCode}");
+    }
+
+    private async Task<Guid?> CreateAsync(NewLocationDialog.NewLocation loc)
+    {
+        Guid? id = null;
+        await RunAsync(async () =>
+        {
+            var userId = await UserIdAsync();
+            var newId = await Locations.CreateAsync(userId, Household!.Id, loc.ParentId, loc.Name, loc.Kind, ct: PageToken);
+            id = newId;
+            if (loc.Label is not null || loc.Color is not null)
+                await Locations.UpdateAsync(userId, newId, new LocationUpdate(loc.Name, loc.Kind, null, loc.Color, loc.Label), PageToken);
+        });
+        if (id is not null)
+        {
+            await ReloadAsync();
+            if (loc.ParentId is { } p)
+                _expanded.Add(p);
+            StateHasChanged();
+        }
+        return id;
+    }
+
+    private async Task CreateHouseholdAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Households.CreateAsync(await UserIdAsync(), _householdName, PageToken);
+            await Ui.RefreshAsync();
+        });
+    }
+}
