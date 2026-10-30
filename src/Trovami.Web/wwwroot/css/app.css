@@ -1302,14 +1302,13 @@ body:has(.print-page) { background: #fff; }
 .label-l .qr-big { font-size: 22pt; }
 .label-l .qr-name { font-size: 13pt; }
 .label-l .qr-path { font-size: 9pt; }
-/* A Dymo LabelWriter roll (99012, 89 x 36 mm): one label per page, the page the label's size. */
+/* A Dymo LabelWriter roll (99012, 89 x 36 mm). On screen the label lies flat; see the print rules for paper. */
 .label-dymo { flex-direction: column; }
-.label-dymo .qr-label { page: dymo; width: 89mm; height: 36mm; padding: 2mm 3mm 2mm 3.5mm; gap: 3.5mm; border-radius: 0; break-after: page; }
+.label-dymo .qr-label { width: 89mm; height: 36mm; padding: 2mm 3mm 2mm 3.5mm; gap: 3.5mm; border-radius: 0; }
 .label-dymo .qr-code { width: 31mm; height: 31mm; }
 .label-dymo .qr-big { font-size: 18pt; }
 .label-dymo .qr-name { font-size: 12pt; }
 .label-dymo .qr-path { font-size: 8pt; }
-@page dymo { size: 89mm 36mm; margin: 0; }
 
 /* ---------- Tablets: an icon rail instead of the full sidebar ---------- */
 
@@ -1452,6 +1451,13 @@ body:has(.print-page) { background: #fff; }
     body { background: #fff; color: #000; }
     .print-page { padding: 0; }
     .qr-label { border-color: #ccc; }
-    .label-dymo .qr-label { border: 0; }
+    .print-page { min-height: 0; }
     @page { margin: 10mm; }
+    /* The Dymo driver's 99012 paper is 36 mm wide and 89 mm long, so a wide page would be shrunk to
+       fit its width. Each label gets a page of the paper's own shape and is turned a quarter onto it. */
+    .label-dymo { display: block; }
+    .dymo-page { page: dymo; position: relative; width: 36mm; height: 89mm; overflow: hidden; }
+    .dymo-page + .dymo-page { break-before: page; }
+    .label-dymo .qr-label { position: absolute; top: 0; left: 36mm; border: 0; transform: rotate(90deg); transform-origin: top left; }
+    @page dymo { size: 36mm 89mm; margin: 0; }
 }

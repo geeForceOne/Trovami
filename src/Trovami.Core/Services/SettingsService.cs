@@ -8,13 +8,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Trovami.Core.Services;
 
-public sealed record SettingsView(Theme Theme, string RegionFormat, string TimeZone, bool HasHomepageToken, DateTime? HomepageTokenCreatedAt);
+public sealed record SettingsView(Theme Theme, string RegionFormat, string TimeZone, bool HasHomepageToken, DateTime? HomepageTokenCreatedAt, string LabelSize);
 
 // Each person's preferences. Read on every request (for the page's formats and theme), so they're
 // kept in memory and refreshed on save.
 public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory)
 {
     public const string HomepageTokenPrefix = "trv_";
+
+    // QR label sizes: small, medium, large and a Dymo LabelWriter roll.
+    public static readonly IReadOnlyList<string> LabelSizes = ["s", "m", "l", "dymo"];
 
     private readonly ConcurrentDictionary<string, SettingsView> _cache = new();
 
@@ -81,6 +84,17 @@ public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory)
         _cache.TryRemove(userId, out _);
     }
 
+    public async Task SetLabelSizeAsync(string userId, string size, CancellationToken ct = default)
+    {
+        if (!LabelSizes.Contains(size))
+            throw new InputException("Pick a label size from the list.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var s = await LoadOrAddAsync(db, userId, ct);
+        s.LabelSize = size;
+        await db.SaveChangesAsync(ct);
+        _cache.TryRemove(userId, out _);
+    }
+
     // A new homepage widget token, replacing any earlier one. Only its hash is stored, so this is
     // the one time it can be shown.
     public async Task<string> CreateHomepageTokenAsync(string userId, CancellationToken ct = default)
@@ -129,5 +143,6 @@ public sealed class SettingsService(IDbContextFactory<AppDbContext> dbFactory)
     public static string Hash(string token) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
     private static SettingsView View(UserSettings s) =>
-        new(s.Theme, s.RegionFormat, s.TimeZone, s.HomepageTokenHash is not null, s.HomepageTokenCreatedAt);
+        new(s.Theme, s.RegionFormat, s.TimeZone, s.HomepageTokenHash is not null, s.HomepageTokenCreatedAt,
+            LabelSizes.Contains(s.LabelSize) ? s.LabelSize : "m"); // rows from before the setting have ""
 }

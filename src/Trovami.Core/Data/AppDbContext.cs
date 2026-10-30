@@ -78,6 +78,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             e.Property(x => x.Theme).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.RegionFormat).HasMaxLength(16);
             e.Property(x => x.TimeZone).HasMaxLength(64);
+            e.Property(x => x.LabelSize).HasMaxLength(8);
             e.HasIndex(x => x.HomepageTokenHash);
         });
 
