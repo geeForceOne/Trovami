@@ -1,13 +1,17 @@
 @page "/"
 @page "/l/{Key}"
+@page "/k"
+@page "/k/{Word}"
 @inherits AppPage
 @inject HouseholdService Households
 @inject LocationService Locations
+@inject ItemService Items
 
 @* The location tree on the left and the picked location on the right. Both routes use this one
-   page, so the tree keeps what's open while moving between locations. On phones it's one
-   column: the tree, or the picked location with a way back. *@
-<PageTitle>@(Id is not null && _tree.Find(Id) is { } shown ? shown.Name : "Locations") · @AppInfo.Name</PageTitle>
+   page, so the tree keeps what's open while moving between locations. Under the tree, the most
+   used keywords (all of them at /k): a picked one shows its items on the right. On phones it's
+   one column: the tree, or the picked location or keyword with a way back. *@
+<PageTitle>@(Word is not null ? Word : AllKeywords ? "Keywords" : Id is not null && _tree.Find(Id) is { } shown ? shown.Name : "Inventory") · @AppInfo.Name</PageTitle>
 
 @if (!_loaded)
 {
@@ -31,7 +35,7 @@ else if (Household is null)
 }
 else
 {
-    <div class="loc-split @(Id is null ? "" : "has-selection")">
+    <div class="loc-split @(Id is null && Word is null && !AllKeywords ? "" : "has-selection")">
         <aside class="loc-nav" aria-label="Locations">
             <div class="loc-nav-head">
                 <h1>Locations</h1>
@@ -50,10 +54,47 @@ else
                 </ul>
             }
             <button type="button" class="btn btn-secondary loc-new" @onclick="NewLocationAsync"><Icon Name="plus" Size="16" /> New location</button>
+
+            @if (_keywords.Count > 0)
+            {
+                <div class="loc-nav-head keyword-head">
+                    <button type="button" class="tree-toggle" aria-expanded="@(_keywordsOpen ? "true" : "false")" aria-controls="keyword-list" @onclick="() => _keywordsOpen = !_keywordsOpen">
+                        <Icon Name="@(_keywordsOpen ? "down" : "right")" Size="14" />
+                    </button>
+                    <h2>Keywords</h2>
+                    <span class="tree-count">@Format.Number(_keywords.Count)</span>
+                </div>
+                @if (_keywordsOpen)
+                {
+                    <ul class="tree keyword-list" id="keyword-list">
+                        @foreach (var k in TopKeywords())
+                        {
+                            var selected = k.Keyword == Word;
+                            <li>
+                                <div class="tree-row @(selected ? "on" : "")">
+                                    <a class="tree-link" href="@KeywordDetail.KeywordLink(k.Keyword)" aria-current="@(selected ? "page" : null)">
+                                        <span class="tree-name">@k.Keyword</span>
+                                    </a>
+                                    <span class="tree-count">@Format.Number(k.Items)</span>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                    <a class="keyword-all @(AllKeywords ? "on" : "")" href="k">@(_keywords.Count > TopKeywordCount ? $"All {Format.Number(_keywords.Count)} keywords" : "Tidy up keywords") <Icon Name="right" Size="14" /></a>
+                }
+            }
         </aside>
 
         <section class="loc-pane">
-            @if (Id is { } id)
+            @if (AllKeywords)
+            {
+                <KeywordList Keywords="_keywords" />
+            }
+            else if (Word is not null)
+            {
+                <KeywordDetail Keyword="@Word" Tree="_tree" Keywords="_keywords" OnChanged="ReloadAsync" />
+            }
+            else if (Id is { } id)
             {
                 <LocationDetail Id="id" Tree="_tree" OnChanged="ReloadAsync" />
             }
@@ -97,6 +138,22 @@ else
     // The picked location's short code; an old /l/<guid> link is taken there too.
     [Parameter] public string? Key { get; set; }
 
+    // The picked keyword, from /k/<keyword>.
+    [Parameter] public string? Word { get; set; }
+
+    // The tree shows only this many keywords, the most used; /k lists them all.
+    private const int TopKeywordCount = 12;
+
+    private bool AllKeywords => Word is null && Key is null && Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/') == "k";
+
+    // The most used, A to Z, plus the picked one when it isn't among them.
+    private IEnumerable<KeywordCount> TopKeywords() => _keywords
+        .OrderByDescending(k => k.Items).ThenBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase)
+        .Take(TopKeywordCount)
+        .Concat(_keywords.Where(k => k.Keyword == Word))
+        .DistinctBy(k => k.Keyword)
+        .OrderBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase);
+
     // Guid.Empty for a code that isn't in the tree: the pane says it no longer exists.
     private Guid? Id => Key is null ? null
         : Guid.TryParse(Key, out var id) ? id
@@ -106,6 +163,8 @@ else
     private string _householdName = "Home";
     private LocationTree _tree = new([]);
     private readonly HashSet<Guid> _expanded = [];
+    private IReadOnlyList<KeywordCount> _keywords = [];
+    private bool _keywordsOpen = true;
     private NewLocationDialog _newDialog = default!;
 
     protected override async Task OnInitializedAsync()
@@ -141,7 +200,9 @@ else
 
     private async Task ReloadAsync()
     {
-        _tree = Household is { } h ? await Locations.TreeAsync(await UserIdAsync(), h.Id, PageToken) : new([]);
+        var userId = await UserIdAsync();
+        _tree = Household is { } h ? await Locations.TreeAsync(userId, h.Id, PageToken) : new([]);
+        _keywords = Household is { } k ? await Items.KeywordsAsync(userId, k.Id, PageToken) : [];
         OpenToSelected();
     }
 
@@ -169,10 +230,6 @@ else
                     @if (node.Label is not null)
                     {
                         <span class="label-chip">@node.Label</span>
-                    }
-                    @if (node.Tags > 0)
-                    {
-                        <span class="tree-tag" title="@Format.Count(node.Tags, "tag", "tags")"><Icon Name="tag" Size="14" /></span>
                     }
                 </a>
                 <span class="tree-count">@(below > 0 ? Format.Number(below) : "")</span>

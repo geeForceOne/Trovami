@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------
    Trovami design system.
 
-   A well-kept storeroom: deep green-black shelves, hairline rules, and photos
+   A well-kept storeroom: deep purple shelves, hairline rules, and photos
    doing most of the talking. One teal for actions and links; the amber of the
    logo's pin dot marks "found" (search hits, the Inbox count) and nothing
    else. Locations can carry one of twelve plain colors, like the lids of
@@ -16,15 +16,15 @@
 :root {
     color-scheme: dark;
 
-    --paper: #0d1414;
-    --sheet: #131c1c;
-    --sheet-2: #1a2525;
-    --sheet-3: #213030;
-    --rule: #233232;
-    --rule-strong: #334747;
-    --ink: #e4ebe9;
-    --ink-soft: #c0ccc9;
-    --pencil: #8a9a97;
+    --paper: #140f1f;
+    --sheet: #1a1428;
+    --sheet-2: #1d1630;
+    --sheet-3: #261d3b;
+    --rule: #2a2240;
+    --rule-strong: #3a2f52;
+    --ink: #ece8f2;
+    --ink-soft: #c9c1d6;
+    --pencil: #978ca8;
 
     --accent: #5cc9b0;
     --accent-strong: #7fd8c3;
@@ -59,11 +59,11 @@
     --c-pink: #ec8fbd;
     --c-brown: #9a7352;
     --c-gray: #8d9896;
-    --c-black: #3a4140;
+    --c-black: #3d3647;
     --c-white: #e9ecea;
 
     --focus: #8fdcc9;
-    --overlay: rgba(3, 8, 8, 0.66);
+    --overlay: rgba(8, 4, 14, 0.66);
     --lift: 0 18px 50px rgba(0, 0, 0, 0.5);
     --lift-sm: 0 6px 18px rgba(0, 0, 0, 0.35);
 
@@ -492,6 +492,8 @@ td.num, th.num, .num.right { text-align: right; }
 .input::placeholder, .textarea::placeholder { color: var(--pencil); opacity: 0.8; }
 .input-code { font-family: var(--font-code); text-transform: uppercase; letter-spacing: 0.06em; max-width: 120px; }
 .input-code[readonly] { text-transform: none; letter-spacing: 0; max-width: none; }
+/* API keys: long and case-sensitive, so the whole width and the code font, as typed. */
+.input-key { font-family: var(--font-code); }
 .input-amount { text-align: right; font-variant-numeric: tabular-nums; }
 .input-lg { min-height: 46px; font-size: var(--t-xl); font-weight: 500; }
 .input-short { max-width: 110px; }
@@ -937,7 +939,6 @@ td.num, th.num, .num.right { text-align: right; }
 .tree-link:hover { text-decoration: none; }
 .tree-link:hover .tree-name { text-decoration: underline; }
 .tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.tree-tag { display: inline-flex; color: var(--pencil); }
 .tree-count { color: var(--pencil); font-size: var(--t-sm); font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
 .tree-row.on { background: var(--accent-soft); }
 .tree-row.on .tree-name { color: var(--accent); }
@@ -1023,6 +1024,25 @@ td.num, th.num, .num.right { text-align: right; }
 .loc-nav .tree { margin-bottom: 0; }
 .loc-nav .tree ul { margin-left: 12px; padding-left: 6px; }
 .loc-new { align-self: flex-start; }
+/* The most used keywords under the tree, and the link to all of them. */
+.keyword-head { justify-content: flex-start; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.keyword-head h2 { flex: 1; font-size: var(--t-lg); }
+.keyword-list .tree-link { padding-left: 10px; }
+.keyword-all { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; font-size: var(--t-sm); }
+.keyword-all.on { font-weight: 600; }
+.keyword-targets { margin-top: 0; }
+.keyword-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+.keyword-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--r-md);
+    background: var(--sheet);
+    color: var(--ink);
+}
+.keyword-link:hover { border-color: var(--accent); text-decoration: none; }
 .loc-pane { min-width: 0; }
 .loc-back { display: none; align-items: center; gap: 6px; margin-bottom: 12px; font-size: var(--t-sm); }
 .new-loc-parent { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -1071,6 +1091,16 @@ td.num, th.num, .num.right { text-align: right; }
 .item-name { padding: 9px 11px 2px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
 .item-name.unnamed { color: var(--pencil); font-style: italic; }
 .item-path { padding: 0 11px 9px; color: var(--pencil); font-size: var(--t-xs); }
+.item-keywords { display: block; padding: 2px 11px 9px; }
+/* An item's first keywords in lists (KeywordChips). */
+.keyword-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.keyword-chip { padding: 0 6px; border-radius: var(--r-sm); background: var(--sheet-3); color: var(--ink-soft); font-size: var(--t-xs); line-height: 1.6; }
+.keyword-more { color: var(--pencil); font-size: var(--t-xs); line-height: 1.6; }
+/* The Inbox as a table: select box with the name, "Put it in…" last. */
+.inbox-table tr.selected td { background: var(--accent-soft); }
+.inbox-row-check { align-items: center; }
+.inbox-row-check input { margin: 0; }
+.inbox-put { width: 240px; }
 .item-link > :last-child { padding-bottom: 10px; }
 .naming { display: inline-flex; align-items: center; gap: 6px; color: var(--pencil); font-style: normal; }
 .item-check { position: absolute; top: 8px; left: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); background: rgba(0, 0, 0, 0.5); cursor: pointer; }
@@ -1116,6 +1146,48 @@ td.num, th.num, .num.right { text-align: right; }
 }
 .link-button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
 
+/* An item's keywords: chips in a box that looks like an input, with the typing field last. */
+.keywords {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 5px 8px;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--r-md);
+    background: var(--sheet-2);
+    cursor: text;
+}
+.keywords:hover { border-color: var(--pencil); }
+.keywords:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.keyword {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 2px 1px 8px;
+    border-radius: var(--r-sm);
+    background: var(--sheet-3);
+    color: var(--ink);
+    font-size: var(--t-sm);
+}
+.keyword button {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--pencil);
+    cursor: pointer;
+}
+.keyword button:hover { color: var(--bad); background: var(--bad-soft); }
+.keywords input { flex: 1 1 120px; min-width: 0; padding: 3px 2px; border: 0; background: none; color: var(--ink); font: inherit; }
+.keywords input:focus { outline: none; }
+.keywords input::placeholder { color: var(--pencil); opacity: 0.8; }
+
 /* ---------- The location picker ---------- */
 
 .picker { position: relative; min-width: 0; }
@@ -1143,6 +1215,25 @@ td.num, th.num, .num.right { text-align: right; }
 .picker-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-path { grid-column: 2; color: var(--pencil); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-none { color: var(--pencil); cursor: default !important; }
+/* Nothing typed: the list is the tree, indented by depth, branches opened with the arrow. */
+.picker-tree li { display: flex; gap: 6px; padding-left: calc(4px + var(--depth, 0) * 16px); }
+.picker-toggle {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--pencil);
+    cursor: pointer;
+}
+button.picker-toggle:hover { color: var(--ink); background: var(--sheet-3); }
+.picker-tree li.here { cursor: default; }
+.picker-tree li.here .picker-name { color: var(--pencil); }
+.picker-here { margin-left: auto; padding-left: 8px; color: var(--pencil); font-size: var(--t-xs); white-space: nowrap; }
 
 /* ---------- Search results ---------- */
 
@@ -1211,6 +1302,14 @@ body:has(.print-page) { background: #fff; }
 .label-l .qr-big { font-size: 22pt; }
 .label-l .qr-name { font-size: 13pt; }
 .label-l .qr-path { font-size: 9pt; }
+/* A Dymo LabelWriter roll (99012, 89 x 36 mm): one label per page, the page the label's size. */
+.label-dymo { flex-direction: column; }
+.label-dymo .qr-label { page: dymo; width: 89mm; height: 36mm; padding: 2mm 3mm 2mm 3.5mm; gap: 3.5mm; border-radius: 0; break-after: page; }
+.label-dymo .qr-code { width: 31mm; height: 31mm; }
+.label-dymo .qr-big { font-size: 18pt; }
+.label-dymo .qr-name { font-size: 12pt; }
+.label-dymo .qr-path { font-size: 8pt; }
+@page dymo { size: 89mm 36mm; margin: 0; }
 
 /* ---------- Tablets: an icon rail instead of the full sidebar ---------- */
 
@@ -1353,5 +1452,6 @@ body:has(.print-page) { background: #fff; }
     body { background: #fff; color: #000; }
     .print-page { padding: 0; }
     .qr-label { border-color: #ccc; }
+    .label-dymo .qr-label { border: 0; }
     @page { margin: 10mm; }
 }

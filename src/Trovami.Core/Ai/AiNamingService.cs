@@ -22,6 +22,9 @@ public sealed class AiNamingQueue
 
 public sealed record AiSettingsView(AiProvider Provider, string Model, SecretStatus Key);
 
+// A developer's own key for local test instances (see Program.cs); never set in production.
+public sealed record DevAiKey(AiProvider Provider, string Key);
+
 // Names items from their photos with the household's own AI key. Runs on the server as soon as a
 // photo arrives, so photos taken offline are named when the phone syncs.
 public sealed class AiNamingService(
@@ -32,6 +35,10 @@ public sealed class AiNamingService(
 
     // Overridable in tests.
     internal Func<AiProvider, string, string, IAiNamer> NamerFactory { get; set; } = AiNamer.Create;
+
+    // Development only: used for households without a working key of their own, so throwaway
+    // instances can name items without entering a key each time.
+    public DevAiKey? DevFallback { get; set; }
 
     public async Task<AiSettingsView> GetSettingsAsync(string userId, Guid householdId, CancellationToken ct = default)
     {
@@ -60,7 +67,8 @@ public sealed class AiNamingService(
         if (h.AiProvider != AiProvider.None && h.AiKeyProtected is not null)
         {
             var failed = await db.Items
-                .Where(i => i.HouseholdId == householdId && i.AiNaming == AiNaming.Failed && i.Name == null && i.NameSource != NameSource.Person && i.PhotoVersion != null)
+                .Where(i => i.HouseholdId == householdId && i.AiNaming == AiNaming.Failed && i.PhotoVersion != null
+                    && ((i.Name == null && i.NameSource != NameSource.Person) || i.Keywords == null))
                 .Select(i => i.Id).ToListAsync(ct);
             await db.Items.Where(i => failed.Contains(i.Id)).ExecuteUpdateAsync(s => s.SetProperty(i => i.AiNaming, AiNaming.Pending), ct);
             foreach (var id in failed)
@@ -95,47 +103,79 @@ public sealed class AiNamingService(
         }
     }
 
+    // The AI has something to do: a name (unless a person typed or cleared one), or keywords.
+    public static bool NeedsAi(Item item) => (item.Name is null && item.NameSource != NameSource.Person) || item.Keywords is null;
+
     internal async Task NameAsync(Guid itemId, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await db.Items.FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null || item.AiNaming != AiNaming.Pending || item.PhotoVersion is null)
             return;
-        if (item.Name is not null || item.NameSource == NameSource.Person)
+        if (!NeedsAi(item))
         {
-            await SetStateAsync(db, itemId, AiNaming.NotNeeded, null, ct);
+            await SetStateAsync(db, itemId, AiNaming.NotNeeded, new AiDescription(null, []), ct);
             return;
         }
 
         var household = await db.Households.AsNoTracking().FirstAsync(h => h.Id == item.HouseholdId, ct);
         var key = _protector.Read(household.AiKeyProtected);
+        var provider = household.AiProvider;
+        var apiKey = key.Status == SecretStatus.Set ? key.Value : null;
+        var model = household.AiModel ?? AiModels.DefaultFor(provider);
+        if ((provider == AiProvider.None || apiKey is null) && DevFallback is { } dev)
+            (provider, apiKey, model) = (dev.Provider, dev.Key, AiModels.DefaultFor(dev.Provider));
         var jpeg = await photos.ReadAsync(item.HouseholdId, item.Id, ct);
-        if (household.AiProvider == AiProvider.None || key.Status != SecretStatus.Set || jpeg is null)
+        if (provider == AiProvider.None || apiKey is null || jpeg is null)
         {
-            await SetStateAsync(db, itemId, AiNaming.Failed, null, ct);
+            await SetStateAsync(db, itemId, AiNaming.Failed, new AiDescription(null, []), ct);
             return;
         }
 
-        string? name;
+        // The household's keywords so far, so the AI reuses them instead of adding near-doubles.
+        IReadOnlyList<string> known = [];
+        if (item.Keywords is null)
+        {
+            var stored = await db.Items.AsNoTracking()
+                .Where(i => i.HouseholdId == item.HouseholdId && i.Keywords != null && i.Keywords != "")
+                .Select(i => i.Keywords).ToListAsync(ct);
+            known = stored.SelectMany(ItemKeywords.Split).GroupBy(k => k)
+                .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => g.Key).Take(AiNamer.MaxKnownKeywords).ToList();
+        }
+
+        AiDescription seen;
         try
         {
-            var namer = NamerFactory(household.AiProvider, key.Value!, household.AiModel ?? AiModels.DefaultFor(household.AiProvider));
-            name = await namer.NameAsync(jpeg, ct);
+            var namer = NamerFactory(provider, apiKey, model);
+            seen = await namer.DescribeAsync(jpeg, known, ct);
         }
         catch (AiException ex)
         {
             logger.LogWarning("AI naming of item {ItemId} failed: {Reason}", itemId, ex.Message);
-            name = null;
+            seen = new AiDescription(null, []);
         }
-        await SetStateAsync(db, itemId, name is null ? AiNaming.Failed : AiNaming.NotNeeded, name, ct);
+        var named = seen.Name is not null || item.Name is not null || item.NameSource == NameSource.Person;
+        var described = seen.Keywords.Count > 0 || item.Keywords is not null;
+        await SetStateAsync(db, itemId, named && described ? AiNaming.NotNeeded : AiNaming.Failed, seen, ct);
     }
 
-    // Only if nobody typed a name in the meantime: a person's name always wins.
-    private static Task SetStateAsync(AppDbContext db, Guid itemId, AiNaming state, string? name, CancellationToken ct) =>
-        db.Items.Where(i => i.Id == itemId && i.Name == null && i.NameSource != NameSource.Person)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(i => i.AiNaming, state)
-                .SetProperty(i => i.Name, name)
-                .SetProperty(i => i.NameSource, name == null ? NameSource.None : NameSource.Ai)
-                .SetProperty(i => i.UpdatedAt, DateTime.UtcNow), ct);
+    // Each part only if nobody filled it in meanwhile: what a person typed always wins.
+    private static async Task SetStateAsync(AppDbContext db, Guid itemId, AiNaming state, AiDescription seen, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        if (seen.Name is not null)
+            await db.Items.Where(i => i.Id == itemId && i.Name == null && i.NameSource != NameSource.Person)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(i => i.Name, seen.Name)
+                    .SetProperty(i => i.NameSource, NameSource.Ai)
+                    .SetProperty(i => i.UpdatedAt, now), ct);
+        if (seen.Keywords.Count > 0)
+        {
+            var keywords = ItemKeywords.Join(seen.Keywords);
+            await db.Items.Where(i => i.Id == itemId && i.Keywords == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(i => i.Keywords, keywords).SetProperty(i => i.UpdatedAt, now), ct);
+        }
+        await db.Items.Where(i => i.Id == itemId).ExecuteUpdateAsync(s => s.SetProperty(i => i.AiNaming, state), ct);
+    }
 }

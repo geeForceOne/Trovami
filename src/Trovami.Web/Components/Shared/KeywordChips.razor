@@ -1,0 +1,19 @@
+@* An item's first few keywords as small chips, for lists; the item's page shows them all. *@
+@if (Keywords.Count > 0)
+{
+    <span class="keyword-chips" title="@string.Join(", ", Keywords)">
+        @foreach (var k in Keywords.Take(Max))
+        {
+            <span class="keyword-chip">@k</span>
+        }
+        @if (Keywords.Count > Max)
+        {
+            <span class="keyword-more">@($"+{Format.Number(Keywords.Count - Max)}")</span>
+        }
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<string> Keywords { get; set; } = [];
+    [Parameter] public int Max { get; set; } = 4;
+}

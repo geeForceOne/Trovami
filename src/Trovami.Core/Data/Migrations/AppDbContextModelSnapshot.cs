@@ -444,6 +444,10 @@ namespace Trovami.Core.Data.Migrations
                     b.Property<Guid>("HouseholdId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Keywords")
+                        .HasMaxLength(840)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("TEXT");
 

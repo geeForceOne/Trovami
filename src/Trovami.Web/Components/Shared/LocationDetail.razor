@@ -13,7 +13,7 @@
 }
 else
 {
-    <a class="loc-back" href=""><Icon Name="left" Size="16" /> All locations</a>
+    <a class="loc-back" href=""><Icon Name="left" Size="16" /> Inventory</a>
 
     @if (_node.ParentId is not null)
     {
@@ -121,33 +121,17 @@ else
     @* Items *@
     <section class="section">
         <div class="section-head">
-            <h2>Items @if (_items.Count > 0) {<span class="count">@Format.Number(_items.Count)</span>}</h2>
+            <h2>Items @if (_below.Count > 0) {<span class="count">@Format.Number(_below.Count)</span>}</h2>
             <div class="segmented" role="radiogroup" aria-label="Show items as">
                 <button type="button" role="radio" class="@(_table ? "" : "on")" aria-checked="@(_table ? "false" : "true")" @onclick="() => SetViewAsync(table: false)"><Icon Name="image" Size="16" /> Photos</button>
                 <button type="button" role="radio" class="@(_table ? "on" : "")" aria-checked="@(_table ? "true" : "false")" @onclick="() => SetViewAsync(table: true)"><Icon Name="list" Size="16" /> Table</button>
             </div>
         </div>
         <ItemAdd LocationId="_node.Id" OnAdded="OnChanged" />
-        <NamingWatcher Active="(_table ? _below : _items).Any(i => i.Naming)" OnTick="LoadAsync" />
-        @if (_table)
+        <NamingWatcher Active="_below.Any(i => i.Naming)" OnTick="LoadAsync" />
+        @if (_below.Count > 0)
         {
-            @if (_below.Count > 0)
-            {
-                <ItemTable Items="_below" Tree="Tree" LocationId="_node.Id" />
-            }
-            else
-            {
-                <p class="muted">Nothing here yet. Add items above, or scan this location's tag with the phone app.</p>
-            }
-        }
-        else if (_items.Count > 0)
-        {
-            <div class="item-grid">
-                @foreach (var item in _items)
-                {
-                    <ItemCard Item="item" />
-                }
-            </div>
+            <ItemTable Items="_below" Tree="Tree" LocationId="_node.Id" Photos="!_table" />
         }
         else
         {
@@ -192,9 +176,7 @@ else
 
     private LocationNode? _node;
     private Guid _shownId;
-    private IReadOnlyList<ItemView> _items = [];
-
-    // The table view shows everything below the location too; the browser remembers the choice.
+    // Everything in the location and below it, as photos or a table; the browser remembers which.
     private const string ViewPref = "itemView";
     private bool _table;
     private IReadOnlyList<ItemView> _below = [];
@@ -229,8 +211,7 @@ else
         if (_node is null || Household is null)
             return;
         var userId = await UserIdAsync();
-        _items = await Items.AtLocationAsync(userId, Household.Id, Id, PageToken);
-        _below = _table ? await Items.BelowAsync(userId, Household.Id, Id, PageToken) : [];
+        _below = await Items.BelowAsync(userId, Household.Id, Id, PageToken);
         _tags = await Tags.ForLocationAsync(userId, Id, PageToken);
     }
 
@@ -239,7 +220,6 @@ else
         if (firstRender && await JS.InvokeAsync<string?>("trovami.getPref", ViewPref) == "table")
         {
             _table = true;
-            await LoadAsync();
             StateHasChanged();
         }
     }
@@ -249,7 +229,6 @@ else
         if (_table == table) return;
         _table = table;
         await JS.InvokeVoidAsync("trovami.setPref", ViewPref, table ? "table" : "photos");
-        await LoadAsync();
     }
 
     private void StartEdit()
@@ -283,11 +262,11 @@ else
     {
         if (_node is null) return;
         var children = Tree.ChildrenOf(Id).Count();
-        var empty = children == 0 && _items.Count == 0;
+        var empty = children == 0 && _node.Items == 0;
         var up = _node.ParentId is null ? "the top level (items go to the Inbox)" : Tree.PathOf(_node.ParentId);
         var ok = await Ui.Confirm.AskAsync($"Delete {_node.Name}?",
             empty ? "It's empty, so nothing else changes." + (_tags.Count > 0 ? " Its tags are unlinked." : "")
-                  : $"What's in it ({Format.Count(children, "location", "locations")}, {Format.Count(_items.Count, "item", "items")}) moves up to {up}. Its tags are unlinked.",
+                  : $"What's in it ({Format.Count(children, "location", "locations")}, {Format.Count(_node.Items, "item", "items")}) moves up to {up}. Its tags are unlinked.",
             empty ? "Delete" : "Move contents up and delete", danger: true);
         if (!ok) return;
         var parent = _node.ParentId;

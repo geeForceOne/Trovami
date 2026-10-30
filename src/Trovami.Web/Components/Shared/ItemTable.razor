@@ -1,17 +1,30 @@
 @inject NavigationManager Nav
 
-@* The table view of a location's items: everything in it and below it, sortable and filtered as
-   you type. "Where" is the path below the location, empty for what's directly in it. *@
+@* A location's items, everything in it and below it, as a table or (Photos) as photo cards:
+   filtered as you type, sorted by the table's columns. "Where" is the path below the location,
+   empty for what's directly in it; the cards show it under the name. *@
 @{ var shown = Rows(); }
 <div class="item-table-tools">
     <input class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter items" autocomplete="off" spellcheck="false" />
-    <label class="check">
-        <input type="checkbox" @bind="_directOnly" /> Only directly here
-    </label>
+    @if (LocationId is not null)
+    {
+        <label class="check">
+            <input type="checkbox" @bind="_directOnly" /> Only directly here
+        </label>
+    }
     <span class="muted small">@Summary(shown.Count)</span>
 </div>
 
-@if (shown.Count > 0)
+@if (shown.Count > 0 && Photos)
+{
+    <div class="item-grid">
+        @foreach (var (item, where) in shown)
+        {
+            <ItemCard @key="item.Id" Item="item" PathText="@where" />
+        }
+    </div>
+}
+else if (shown.Count > 0)
 {
     <div class="table-scroll">
         <table class="table item-table">
@@ -59,7 +72,11 @@ else if (Items.Count > 0)
     // Everything in the location and below it.
     [Parameter, EditorRequired] public IReadOnlyList<ItemView> Items { get; set; } = [];
     [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
-    [Parameter, EditorRequired] public Guid LocationId { get; set; }
+    // Null: items from anywhere (a keyword's), shown with their full path.
+    [Parameter, EditorRequired] public Guid? LocationId { get; set; }
+
+    // Photo cards instead of the table.
+    [Parameter] public bool Photos { get; set; }
 
     private enum Column { Name, Quantity, Where, Added }
 
@@ -80,7 +97,7 @@ else if (Items.Count > 0)
         var rows = Items
             .Where(i => !_directOnly || i.LocationId == LocationId)
             .Select(i => (Item: i, Where: Where(i)))
-            .Where(x => words.Count == 0 || words.All(Search.Normalize($"{x.Item.ShownName} {x.Item.Notes} {x.Where}").Contains));
+            .Where(x => words.Count == 0 || words.All(Search.Normalize($"{x.Item.ShownName} {x.Item.Notes} {string.Join(' ', x.Item.Keywords)} {x.Where}").Contains));
         Func<(ItemView Item, string Where), object> key = _sort switch
         {
             Column.Quantity => x => x.Item.Quantity,
@@ -96,7 +113,8 @@ else if (Items.Count > 0)
 
     // The path below the picked location; empty for what's directly in it.
     private string Where(ItemView item) =>
-        item.LocationId is { } id && id != LocationId
+        LocationId is null ? item.Path
+        : item.LocationId is { } id && id != LocationId
             ? string.Join(LocationTree.Separator, Tree.Ancestry(id).SkipWhile(n => n.Id != LocationId).Skip(1).Select(n => n.Name))
             : "";
 

@@ -140,6 +140,8 @@ public sealed class Item
     public const int MaxNameLength = 120;
     public const int MaxNotesLength = 2000;
     public const int MaxQuantity = 1_000_000;
+    public const int MaxKeywords = 20;
+    public const int MaxKeywordLength = 40;
 
     // Created on the phone, possibly offline, so the client picks the id; uploading it twice is
     // harmless.
@@ -156,6 +158,10 @@ public sealed class Item
     public AiNaming AiNaming { get; set; } = AiNaming.NotNeeded;
     public string? Notes { get; set; }
     public int Quantity { get; set; } = 1;
+
+    // Words Find also matches (color, material, kind of thing), comma-separated. Null: not set yet,
+    // so the AI fills them in from the photo; once set, by the AI or a person, the AI leaves them.
+    public string? Keywords { get; set; }
 
     // Set once the photo has arrived; see Location.PhotoVersion.
     public string? PhotoVersion { get; set; }

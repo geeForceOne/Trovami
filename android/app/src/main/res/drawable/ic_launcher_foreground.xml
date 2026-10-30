@@ -12,7 +12,7 @@
             android:strokeLineJoin="round"
             android:strokeWidth="5.4" />
         <path
-            android:fillColor="#131C1C"
+            android:fillColor="@color/icon_pin"
             android:pathData="M32,41C32,41 17,29.5 17,19A15,15 0,0 1,47 19C47,29.5 32,41 32,41Z"
             android:strokeColor="#5CC9B0"
             android:strokeLineJoin="round"

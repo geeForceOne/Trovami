@@ -1,7 +1,6 @@
 package io.github.geeforceone.trovami.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +13,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,26 +44,32 @@ fun TrovamiRoot(model: MainViewModel) {
 
     val state = prefs
     val signedIn = state?.session != null
-    BackHandler(enabled = signedIn && model.screen != Screen.Camera) { model.screen = Screen.Camera }
+    BackHandler(enabled = signedIn && model.screen != Screen.Camera) {
+        model.screen = if ((model.screen as? Screen.LinkTag)?.setup == true) Screen.SetUpTags else Screen.Camera
+    }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        when {
-            state == null -> Unit
-            !signedIn -> SignInScreen(model)
-            else -> when (val screen = model.screen) {
-                Screen.Camera -> CameraScreen(model)
-                is Screen.LinkTag -> LinkTagScreen(model, screen)
-                Screen.PickTarget -> PickTargetScreen(model)
-                Screen.ScanQr -> ScanQrScreen(model)
-                Screen.Settings -> SettingsScreen(model)
+    // A Surface, not a plain background, so text and icons get the theme's content color.
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Box(Modifier.fillMaxSize()) {
+            when {
+                state == null -> Unit
+                !signedIn -> SignInScreen(model)
+                else -> when (val screen = model.screen) {
+                    Screen.Camera -> CameraScreen(model)
+                    is Screen.LinkTag -> LinkTagScreen(model, screen)
+                    Screen.PickTarget -> PickTargetScreen(model)
+                    Screen.SetUpTags -> SetUpTagsScreen(model)
+                    Screen.ScanQr -> ScanQrScreen(model)
+                    Screen.Settings -> SettingsScreen(model)
+                }
             }
+            // Above the camera's shutter row, so a message never hides it.
+            val lift = if (signedIn && model.screen == Screen.Camera) 132.dp else 8.dp
+            SnackbarHost(
+                snackbar,
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = lift),
+            )
         }
-        // Above the camera's shutter row, so a message never hides it.
-        val lift = if (signedIn && model.screen == Screen.Camera) 132.dp else 8.dp
-        SnackbarHost(
-            snackbar,
-            Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = lift),
-        )
     }
 
     model.updatedTo?.let { release ->

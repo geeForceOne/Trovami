@@ -19,7 +19,7 @@
                 <HouseholdSwitcher />
 
                 <nav class="side-nav" aria-label="Main">
-                    <NavLink href="" Match="NavLinkMatch.All" ActiveClass="active"><Icon Name="house" /><span>Locations</span></NavLink>
+                    <NavLink href="" Match="NavLinkMatch.All" ActiveClass="active"><Icon Name="house" /><span>Inventory</span></NavLink>
                     <NavLink href="inbox" ActiveClass="active">
                         <Icon Name="inbox" /><span>Inbox</span>
                         @if (_ui.InboxCount > 0)
@@ -69,7 +69,7 @@
 
     <AuthorizeView>
         <nav class="tabbar" aria-label="Main">
-            <NavLink href="" Match="NavLinkMatch.All" ActiveClass="active"><Icon Name="house" Size="22" />Locations</NavLink>
+            <NavLink href="" Match="NavLinkMatch.All" ActiveClass="active"><Icon Name="house" Size="22" />Inventory</NavLink>
             <NavLink href="inbox" ActiveClass="active">
                 <span class="tab-icon"><Icon Name="inbox" Size="22" />@if (_ui.InboxCount > 0) {<span class="tab-dot"></span>}</span>Inbox
             </NavLink>

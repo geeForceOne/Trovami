@@ -1,27 +1,56 @@
-@* Picks a location by typing part of its name or path, inline: a text field with a list below it,
-   arrow keys and Enter to choose, Escape to close. Used wherever something moves. *@
+@* Picks a location, inline: a text field with a list below it. Empty, the list is the location
+   tree to open and close; typing turns it into the matches with their paths. Arrow keys move
+   (right and left open and close a branch), Enter chooses, Escape closes. Used wherever
+   something moves. *@
 <div class="picker @(_open ? "open" : "")">
     <input class="input picker-input" placeholder="@Placeholder" aria-label="@Placeholder" autocomplete="off" spellcheck="false"
            @bind="_text" @bind:event="oninput" @bind:after="Filter" @onfocus="Open" @onkeydown="OnKeyAsync" @ref="_input" />
     @if (_open)
     {
         <div class="menu-scrim" @onclick="Close"></div>
-        <ul class="picker-list" role="listbox">
-            @for (var i = 0; i < _matches.Count; i++)
+        <ul class="picker-list @(Browsing ? "picker-tree" : "")" role="listbox">
+            @for (var i = 0; i < _rows.Count; i++)
             {
-                var (id, name, path, kind) = _matches[i];
+                var row = _rows[i];
                 var index = i;
-                <li role="option" aria-selected="@(index == _active ? "true" : "false")" class="@(index == _active ? "active" : "")"
-                    @onmousedown="() => PickAsync(id)" @onmousedown:preventDefault="true" @onmouseover="() => _active = index">
-                    <Icon Name="@(id is null ? "inbox" : Format.KindIcon(kind))" Size="16" />
-                    <span class="picker-name">@name</span>
-                    @if (path.Length > 0)
-                    {
-                        <span class="picker-path">@path</span>
-                    }
-                </li>
+                @if (Browsing)
+                {
+                    <li role="option" aria-selected="@(index == _active ? "true" : "false")" aria-disabled="@(row.Pickable ? null : "true")"
+                        class="@(index == _active ? "active" : "") @(row.Pickable ? "" : "here")" style="--depth:@row.Depth"
+                        @onmousedown="() => PickRowAsync(row)" @onmousedown:preventDefault="true" @onmouseover="() => _active = index">
+                        @if (row.HasChildren)
+                        {
+                            <button type="button" class="picker-toggle" tabindex="-1" aria-label="@(row.Open ? "Collapse" : "Expand")"
+                                    @onmousedown="() => Toggle(row)" @onmousedown:preventDefault="true" @onmousedown:stopPropagation="true">
+                                <Icon Name="@(row.Open ? "down" : "right")" Size="14" />
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="picker-toggle"></span>
+                        }
+                        <Icon Name="@(row.Id is null ? "inbox" : Format.KindIcon(row.Kind))" Size="16" />
+                        <span class="picker-name">@row.Name</span>
+                        @if (!row.Pickable)
+                        {
+                            <span class="picker-here">here now</span>
+                        }
+                    </li>
+                }
+                else
+                {
+                    <li role="option" aria-selected="@(index == _active ? "true" : "false")" class="@(index == _active ? "active" : "")"
+                        @onmousedown="() => PickRowAsync(row)" @onmousedown:preventDefault="true" @onmouseover="() => _active = index">
+                        <Icon Name="@(row.Id is null ? "inbox" : Format.KindIcon(row.Kind))" Size="16" />
+                        <span class="picker-name">@row.Name</span>
+                        @if (row.Path.Length > 0)
+                        {
+                            <span class="picker-path">@row.Path</span>
+                        }
+                    </li>
+                }
             }
-            @if (_matches.Count == 0)
+            @if (_rows.Count == 0)
             {
                 <li class="picker-none">No location matches.</li>
             }
@@ -50,7 +79,15 @@
     private bool _open;
     private int _active;
     private ElementReference _input;
-    private List<(Guid? Id, string Name, string Path, LocationKind Kind)> _matches = [];
+    private List<Row> _rows = [];
+    private readonly HashSet<Guid> _expanded = [];
+
+    // One line of the list. In the tree, Depth indents it; Pickable is false for where the thing is now.
+    private sealed record Row(Guid? Id, string Name, string Path, LocationKind Kind, int Depth = 0,
+        bool HasChildren = false, bool Open = false, bool Pickable = true);
+
+    // Nothing typed: the list is the tree.
+    private bool Browsing => string.IsNullOrWhiteSpace(_text);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -64,6 +101,16 @@
 
     private void Open()
     {
+        if (!_open)
+        {
+            // The first level open, and the way to where the thing is now.
+            _expanded.Clear();
+            foreach (var top in Tree.ChildrenOf(null))
+                _expanded.Add(top.Id);
+            if (Current is { } c && Tree.Contains(c))
+                foreach (var a in Tree.Ancestry(c).SkipLast(1))
+                    _expanded.Add(a.Id);
+        }
         _open = true;
         Filter();
     }
@@ -79,34 +126,74 @@
         _open = true;
         var words = Search.Words(_text);
         var excluded = Exclude is { } e ? Tree.Subtree(e).Select(n => n.Id).ToHashSet() : [];
-        var list = new List<(Guid?, string, string, LocationKind)>();
+        var list = new List<Row>();
         if (AllowInbox && Current is not null && words.All(w => "inbox".Contains(w)))
-            list.Add((null, "Inbox", "", LocationKind.Other));
-        list.AddRange(Tree.All
-            .Where(n => !excluded.Contains(n.Id) && n.Id != Current)
-            .Select(n => (Node: n, Path: Tree.PathOf(n.Id)))
-            .Where(x => words.All(w => Search.Normalize(x.Path + " " + x.Node.Label).Contains(w)))
-            .OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase)
-            .Take(MaxShown)
-            .Select(x => ((Guid?)x.Node.Id, x.Node.Name, x.Node.ParentId is null ? "" : Tree.PathOf(x.Node.ParentId), x.Node.Kind)));
-        _matches = list;
-        _active = 0;
+            list.Add(new Row(null, "Inbox", "", LocationKind.Other));
+        if (words.Count == 0)
+        {
+            AddBranch(list, null, 0, excluded);
+        }
+        else
+        {
+            list.AddRange(Tree.All
+                .Where(n => !excluded.Contains(n.Id) && n.Id != Current)
+                .Select(n => (Node: n, Path: Tree.PathOf(n.Id)))
+                .Where(x => words.All(w => Search.Normalize(x.Path + " " + x.Node.Label).Contains(w)))
+                .OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase)
+                .Take(MaxShown)
+                .Select(x => new Row(x.Node.Id, x.Node.Name, x.Node.ParentId is null ? "" : Tree.PathOf(x.Node.ParentId), x.Node.Kind)));
+        }
+        _rows = list;
+        _active = Math.Max(0, list.FindIndex(r => r.Pickable));
+    }
+
+    // The visible part of the tree under parent, depth first, in the Locations page's order.
+    private void AddBranch(List<Row> list, Guid? parent, int depth, HashSet<Guid> excluded)
+    {
+        foreach (var node in Tree.ChildrenOf(parent).Where(n => !excluded.Contains(n.Id)))
+        {
+            var hasChildren = Tree.ChildrenOf(node.Id).Any(c => !excluded.Contains(c.Id));
+            var open = hasChildren && _expanded.Contains(node.Id);
+            list.Add(new Row(node.Id, node.Name, "", node.Kind, depth, hasChildren, open, Pickable: node.Id != Current));
+            if (open)
+                AddBranch(list, node.Id, depth + 1, excluded);
+        }
+    }
+
+    private void Toggle(Row row)
+    {
+        if (row.Id is not { } id) return;
+        if (!_expanded.Remove(id))
+            _expanded.Add(id);
+        Filter();
+        _active = Math.Max(0, _rows.FindIndex(r => r.Id == id));
     }
 
     private async Task OnKeyAsync(KeyboardEventArgs e)
     {
         switch (e.Key)
         {
-            case "ArrowDown": _active = Math.Min(_active + 1, _matches.Count - 1); _open = true; break;
+            case "ArrowDown": _active = Math.Min(_active + 1, _rows.Count - 1); _open = true; break;
             case "ArrowUp": _active = Math.Max(_active - 1, 0); break;
+            case "ArrowRight" when Browsing && _open && _active < _rows.Count && _rows[_active] is { HasChildren: true, Open: false } closed:
+                Toggle(closed);
+                break;
+            case "ArrowLeft" when Browsing && _open && _active < _rows.Count:
+                var row = _rows[_active];
+                if (row.Open)
+                    Toggle(row);
+                else if (Tree.Find(row.Id)?.ParentId is { } parent)
+                    _active = Math.Max(0, _rows.FindIndex(r => r.Id == parent));
+                break;
             case "Escape": Close(); break;
-            case "Enter" when _open && _matches.Count > 0: await PickAsync(_matches[_active].Id); break;
+            case "Enter" when _open && _active < _rows.Count: await PickRowAsync(_rows[_active]); break;
         }
     }
 
-    private async Task PickAsync(Guid? id)
+    private async Task PickRowAsync(Row row)
     {
+        if (!row.Pickable) return;
         Close();
-        await OnPick.InvokeAsync(id);
+        await OnPick.InvokeAsync(row.Id);
     }
 }

@@ -47,11 +47,15 @@ import java.util.UUID
 sealed interface Screen {
     data object Camera : Screen
 
-    // An unknown tag was scanned (or a blank one just got its code): pick its location.
-    data class LinkTag(val code: String, val written: Boolean) : Screen
+    // An unknown tag was scanned (or a blank one just got its code): pick its location. setup: it
+    // came from Set up tags, and goes back there afterwards.
+    data class LinkTag(val code: String, val written: Boolean, val setup: Boolean = false) : Screen
 
     // Aim the camera at a location without a tag.
     data object PickTarget : Screen
+
+    // Tags one after another, without the camera (some phones read no tags while it's open).
+    data object SetUpTags : Screen
 
     data object ScanQr : Screen
 
@@ -89,6 +93,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val waiting = dao.waitingCount().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     var screen by mutableStateOf<Screen>(Screen.Camera)
+
+    // The camera closes when it's idle, so the phone can read tags again; a tap or a tag opens it.
+    var cameraPaused by mutableStateOf(false)
+
+    // On Set up tags: the location the last tag was linked to, or the one a scanned tag already has.
+    var setUpLinked by mutableStateOf<String?>(null)
+        private set
+    var setUpFound by mutableStateOf<Pair<String, LocationRow?>?>(null)
+        private set
+
     var details by mutableStateOf(Details())
     var busy by mutableStateOf(false)
         private set
@@ -202,12 +216,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             say("Sign in first, then scan the tag again.")
             return@launch
         }
+        val setup = screen == Screen.SetUpTags
         val tag = dao.tag(code)
         if (tag == null) {
-            screen = Screen.LinkTag(code, written = false)
+            screen = Screen.LinkTag(code, written = false, setup = setup)
+            return@launch
+        }
+        if (setup) {
+            setUpLinked = null
+            setUpFound = code to dao.location(tag.locationId)
             return@launch
         }
         aim(tag.householdId, tag.locationId)
+        cameraPaused = false
         screen = Screen.Camera
         dao.location(tag.locationId)?.let { say("Adding to ${it.name}") }
     }
@@ -225,7 +246,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val code = TrovamiTags.newCode()
                 try {
                     TrovamiTags.write(tag, code, app.packageName)
-                    viewModelScope.launch { screen = Screen.LinkTag(code, written = true) }
+                    viewModelScope.launch { screen = Screen.LinkTag(code, written = true, setup = screen == Screen.SetUpTags) }
                 } catch (e: IOException) {
                     say(e.message?.takeIf { it.isNotBlank() } ?: "Writing the tag failed. Hold it still and try again.")
                 }
@@ -233,12 +254,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun link(code: String, location: LocationRow) = viewModelScope.launch {
+    fun link(code: String, location: LocationRow, setup: Boolean) = viewModelScope.launch {
         dao.upsertTag(TagRow(code, location.householdId, location.id, pending = true))
         SyncWorker.request(app)
+        if (setup) {
+            setUpFound = null
+            setUpLinked = location.name
+            screen = Screen.SetUpTags
+            return@launch
+        }
         aim(location.householdId, location.id)
+        cameraPaused = false
         screen = Screen.Camera
         say("Tag linked to ${location.name}")
+    }
+
+    fun openSetUpTags() {
+        setUpLinked = null
+        setUpFound = null
+        screen = Screen.SetUpTags
+    }
+
+    // The tag shown on Set up tags, to link it somewhere else.
+    fun relinkFound() {
+        val (code, _) = setUpFound ?: return
+        screen = Screen.LinkTag(code, written = false, setup = true)
     }
 
     // A location made on the phone (while linking a tag), under parent or at the top.
@@ -254,6 +294,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun aimAt(location: LocationRow?) = viewModelScope.launch {
         if (location == null) targetId.value = null else aim(location.householdId, location.id)
+        cameraPaused = false
         screen = Screen.Camera
     }
 
