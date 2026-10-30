@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+build/
+/local.properties
+/.idea/
+*.iml
+captures/
+.cxx/
+
+# Signing: the keystore and its passwords never go into the repository.
+*.jks
+*.keystore
+keystore.properties
