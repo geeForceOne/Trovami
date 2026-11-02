@@ -11,6 +11,7 @@ using Trovami.Web.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.EntityFrameworkCore;
@@ -122,6 +123,14 @@ builder.Services.AddRazorComponents()
     .AddHubOptions(o => o.MaximumReceiveMessageSize = 1024 * 1024);
 
 var app = builder.Build();
+
+// Behind a reverse proxy that ends HTTPS, so redirects and links keep https. Only the scheme: the
+// proxy's address isn't known in advance, so X-Forwarded-For from anyone would let a caller fake
+// the IP that the account request limit counts.
+var forwarded = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedProto };
+forwarded.KnownIPNetworks.Clear();
+forwarded.KnownProxies.Clear();
+app.UseForwardedHeaders(forwarded);
 
 await using (var scope = app.Services.CreateAsyncScope())
 {

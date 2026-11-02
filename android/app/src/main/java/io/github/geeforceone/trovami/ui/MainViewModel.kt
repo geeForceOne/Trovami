@@ -42,7 +42,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.UUID
+import javax.net.ssl.SSLException
 
 sealed interface Screen {
     data object Camera : Screen
@@ -142,15 +146,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // The pairing QR from the web app's Profile: trovami://pair?server=…&code=…
-    fun pair(raw: String) {
+    // Returns the server it tries, so the form can show it if this fails.
+    fun pair(raw: String): String? {
         val uri = Uri.parse(raw.trim())
         val server = uri.getQueryParameter("server")
         val code = uri.getQueryParameter("code")
         if (uri.scheme != "trovami" || uri.host != "pair" || server.isNullOrBlank() || code.isNullOrBlank()) {
             say("That isn't a Trovami pairing code. Open Profile → Connect a phone in the web app.")
-            return
+            return null
         }
-        signInWith(server) { url -> app.api.pair(url, code, deviceName()) }
+        pairWithCode(server, code)
+        return server
+    }
+
+    // The same code typed in, for when scanning isn't an option.
+    fun pairWithCode(server: String, code: String) = signInWith(server) { url ->
+        app.api.pair(url, code.trim(), deviceName())
     }
 
     private fun signInWith(server: String, call: suspend (String) -> io.github.geeforceone.trovami.net.SignInResponse) {
@@ -170,13 +181,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 say(e.message ?: "Signing in failed.")
             } catch (e: IOException) {
                 Log.w(TAG, "Signing in failed", e)
-                say("Can't reach that server. Check the address and that the phone is on the right network.")
+                say(connectionProblem(e))
             } catch (_: IllegalArgumentException) {
                 say("That server address isn't valid.")
             } finally {
                 busy = false
             }
         }
+    }
+
+    // The cause in plain words: each of these points to a different thing to check.
+    private fun connectionProblem(e: IOException): String = when (e) {
+        is UnknownHostException -> "Can't find that server. Check the address and the phone's connection."
+        is SocketTimeoutException -> "That server didn't answer in time. Check the address and that the phone is on the right network."
+        is ConnectException -> "That server refused the connection. Check the address and the port, and that the server is running."
+        is SSLException -> "Can't connect securely to that server. Check its certificate, or whether the address should start with http:// instead."
+        else -> "Can't reach that server. Check the address and that the phone is on the right network."
     }
 
     // Unsent items are lost; the screen warns about them first.

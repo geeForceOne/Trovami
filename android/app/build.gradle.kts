@@ -17,7 +17,9 @@ android {
     defaultConfig {
         applicationId = "io.github.geeforceone.trovami"
         minSdk = 29
-        targetSdk = 37
+        // Not 37: Android 17 then blocks the local network unless the user grants a permission, and
+        // a Trovami server is usually at home. No Play Store requirement pushes this up.
+        targetSdk = 36
         versionName = trovamiVersion
         versionCode = versionParts?.let { (major, minor, patch) -> major * 10000 + minor * 100 + patch } ?: 1
     }

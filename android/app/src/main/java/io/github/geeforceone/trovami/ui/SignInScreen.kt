@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -54,13 +55,20 @@ import io.github.geeforceone.trovami.R
 @Composable
 fun SignInScreen(model: MainViewModel) {
     var scanning by rememberSaveable { mutableStateOf(false) }
+    // Up here so they survive a trip to the scanner.
+    var server by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(Unit) { if (server.isEmpty()) server = model.lastServer().orEmpty() }
+
     if (scanning) {
         BackHandler { scanning = false }
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             WithCameraPermission {
                 QrScanner(Modifier.fillMaxSize()) { raw ->
                     scanning = false
-                    model.pair(raw)
+                    model.pair(raw)?.let { server = it }
                 }
             }
             Surface(
@@ -78,10 +86,7 @@ fun SignInScreen(model: MainViewModel) {
         return
     }
 
-    var server by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(Unit) { if (server.isEmpty()) server = model.lastServer().orEmpty() }
+    val codeReady = server.isNotBlank() && code.isNotBlank() && !model.busy
     val ready = server.isNotBlank() && email.isNotBlank() && password.isNotEmpty() && !model.busy
 
     Box(Modifier.fillMaxSize().systemBarsPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
@@ -124,6 +129,30 @@ fun SignInScreen(model: MainViewModel) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth(),
             )
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it },
+                label = { Text("Code from Connect a phone") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                    autoCorrectEnabled = false,
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Go,
+                ),
+                keyboardActions = KeyboardActions(onGo = { if (codeReady) model.pairWithCode(server, code) }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(onClick = { model.pairWithCode(server, code) }, enabled = codeReady, modifier = Modifier.fillMaxWidth()) {
+                Text("Connect with code")
+            }
+
+            Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                HorizontalDivider(Modifier.weight(1f))
+                Text("or", Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(Modifier.weight(1f))
+            }
+
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
