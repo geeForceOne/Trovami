@@ -22,8 +22,23 @@ android {
         versionCode = versionParts?.let { (major, minor, patch) -> major * 10000 + minor * 100 + patch } ?: 1
     }
 
+    // The release workflow restores the keystore and sets these. Without them a release build stays
+    // unsigned, so nothing secret is ever needed to build locally.
+    val keystoreFile = System.getenv("TROVAMI_KEYSTORE_FILE")
+    signingConfigs {
+        if (keystoreFile != null) {
+            create("release") {
+                storeFile = file(keystoreFile)
+                storePassword = System.getenv("TROVAMI_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TROVAMI_KEY_ALIAS")
+                keyPassword = System.getenv("TROVAMI_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystoreFile != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

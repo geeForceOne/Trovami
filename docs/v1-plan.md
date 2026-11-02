@@ -2,7 +2,7 @@
 
 Decisions are in `CLAUDE.md`; this file covers the order of work and the points still open.
 
-**Status (2026-10-30):** milestones 1–8 are built (web app and phone API), and milestone 9 (Android app in `android/`: application ID `io.github.geeforceone.trovami`, Android 10 and newer) is tested on the emulator; its NFC flows still need a check on a real phone. Milestone 10 is next. The open points below were taken with their defaults. The repository is private on GitHub; its license and visibility (point 5) are still open.
+**Status (2026-11-02):** milestones 1–9 are built, and milestone 10 is ready for its test handover. The repository goes public, under the MIT license, just before 1.0.0 is published.
 
 ## Milestones
 
@@ -29,4 +29,4 @@ Milestones 1–8 need only .NET and can start right away. Milestone 9 needs Andr
 4. **Deleting:** items are deleted with a confirmation; there's no trash/archive in v1.
 5. **Repo:** github.com/geeForceOne/Trovami, MIT license, public like LaLira? (decide before the first push)
 6. **Ports:** 5337 local, 8337 host (LaLira uses 5336/8336).
-7. **Email:** Brevo SMTP like the others, sender trovami@gathome.net, host trovami.gathome.net.
+7. **Email:** any SMTP server, set in Admin settings.

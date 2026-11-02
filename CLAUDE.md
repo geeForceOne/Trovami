@@ -69,7 +69,7 @@ Latest .NET (currently .NET 10, `net10.0`), Blazor Server, `.slnx` solution, plu
 ### Hosting and data
 - **SQLite** through EF Core. Everything persistent (database, photos, Data Protection keys, backups) lives under one data directory, a Docker **volume** at `/data`, never in the image. Paths come from `Storage__*` environment variables.
 - The container listens on 8080; `docker-compose.yml` maps host port 8337.
-- A `vX.Y.Z` tag runs GitHub Actions: the image goes to `ghcr.io/geeforceone/trovami` (X.Y.Z / X.Y / latest), and a signed release APK (keystore from Actions secrets) is attached to the GitHub release.
+- A `vX.Y.Z` tag runs GitHub Actions: `docker-publish.yml` sends the image to `ghcr.io/geeforceone/trovami` (X.Y.Z / X.Y / latest), and `android-release.yml` creates the GitHub release from that version's `CHANGELOG.md` section with the signed APK attached (keystore from Actions secrets; a manual run only builds the APK as an artifact).
 
 ### Authentication
 - ASP.NET Core Identity with email and password, in the same SQLite database; the email is the Identity UserName. Keep it structured so external logins can be added later.
@@ -90,4 +90,5 @@ Latest .NET (currently .NET 10, `net10.0`), Blazor Server, `.slnx` solution, plu
 - **Gotcha:** numbers written into SVG attributes must use the invariant culture.
 - **Gotcha:** a component callback passed as a plain `Func<...>` (not EventCallback) doesn't re-render the parent; call StateHasChanged after it changes state.
 - **Gotcha:** don't name a component parameter `Assets`; it collides with `ComponentBase.Assets` in .NET 10.
+- **Gotcha:** the release APK is minified by R8, so a debug build proves little about it: anything created by reflection can break in release only (ML Kit's registrars crashed the QR scanner). Test Android changes on a release build before a release.
 - **Gotcha:** Blazor renders a bool attribute value `true` as an empty attribute and drops it for `false`; write `aria-pressed="@(x ? "true" : "false")"` (same for aria-expanded and aria-checked).

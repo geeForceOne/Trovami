@@ -1,0 +1,73 @@
+name: Android release
+
+# Builds the signed APK. On a `vX.Y.Z` tag it also creates the GitHub release: the title is the bare
+# version, the body is that version's CHANGELOG.md section, and the APK is attached (the app's update
+# check looks for it there). A manual run only builds the APK and keeps it as a workflow artifact,
+# so signing can be tried without releasing anything.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch: {}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Compute app version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0"; fi
+          echo "APP_VERSION=$v" >> "$GITHUB_ENV"
+
+      # The keystore lives only in Actions secrets; it's written outside the checkout for this run.
+      - name: Restore the signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/trovami-release.jks"
+          echo "TROVAMI_KEYSTORE_FILE=$RUNNER_TEMP/trovami-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build the signed APK
+        working-directory: android
+        env:
+          TROVAMI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TROVAMI_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease -PtrovamiVersion="$APP_VERSION" --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/trovami-$APP_VERSION.apk"
+
+      - name: Keep the APK of a manual run
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: trovami-apk
+          path: ${{ runner.temp }}/trovami-${{ env.APP_VERSION }}.apk
+          retention-days: 7
+
+      - name: Create the GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # This version's section of CHANGELOG.md, without its heading.
+          awk -v v="## $APP_VERSION" 'index($0, v) == 1 { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then echo "CHANGELOG.md has no section for $APP_VERSION"; exit 1; fi
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/trovami-$APP_VERSION.apk" \
+            --title "$APP_VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
