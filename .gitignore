@@ -34,6 +34,8 @@ secrets.json
 *.pfx
 *.pem
 *.key
+*.jks
+*.keystore
 
 # Claude Code machine-local settings (the shared settings.json stays tracked)
 .claude/settings.local.json
