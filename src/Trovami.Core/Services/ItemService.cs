@@ -109,6 +109,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         var locationId = create.LocationId is { } l && await db.Locations.AnyAsync(x => x.Id == l && x.HouseholdId == householdId, ct)
             ? l : (Guid?)null;
         var name = CleanName(create.Name);
+        var keywords = locationId is null ? [] : (await LocationService.LoadTreeAsync(db, householdId, ct)).KeywordsFor(locationId);
         db.Items.Add(new Item
         {
             Id = create.Id,
@@ -121,6 +122,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             AiNaming = create.PhotoExpected ? AiNaming.Pending : AiNaming.NotNeeded,
             Notes = CleanNotes(create.Notes),
             Quantity = CheckQuantity(create.Quantity),
+            Keywords = ItemKeywords.Merge(null, keywords),
             PhotoExpected = create.PhotoExpected,
             CreatedById = userId,
         });
@@ -143,7 +145,10 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             item.NameSource = NameSource.Person;
         }
         if (keywords is not null && ItemKeywords.Join(keywords) is var joined && joined != item.Keywords)
+        {
             item.Keywords = joined;
+            item.KeywordsFinal = true;
+        }
         if (item.AiNaming == AiNaming.Pending && !AiNamingService.NeedsAi(item))
             item.AiNaming = AiNaming.NotNeeded;
         item.Notes = CleanNotes(notes);
@@ -164,7 +169,8 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         await db.SaveChangesAsync(ct);
     }
 
-    // Moves several items at once (the Inbox's multi-select); locationId null: to the Inbox.
+    // Moves several items at once (the Inbox's multi-select); locationId null: to the Inbox. An item
+    // that arrives somewhere new gets that location's keywords and keeps the ones it has.
     public async Task MoveAsync(string userId, IReadOnlyCollection<Guid> ids, Guid? locationId, CancellationToken ct = default)
     {
         if (ids.Count == 0)
@@ -177,9 +183,14 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             if (locationId is { } l && !await db.Locations.AnyAsync(x => x.Id == l && x.HouseholdId == householdId, ct))
                 throw new NotFoundException("That location no longer exists.");
         }
+        var added = locationId is not null && items.Count > 0
+            ? (await LocationService.LoadTreeAsync(db, items[0].HouseholdId, ct)).KeywordsFor(locationId)
+            : [];
         var now = DateTime.UtcNow;
         foreach (var item in items)
         {
+            if (item.LocationId != locationId)
+                item.Keywords = ItemKeywords.Merge(item.Keywords, added);
             item.LocationId = locationId;
             item.UpdatedAt = now;
         }
@@ -297,9 +308,9 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         return (await HavingKeywordAsync(db, householdId, keyword, ct)).Select(i => View(i, tree)).ToList();
     }
 
-    // Renames a keyword on every item that has it; renaming it to one that exists merges the two.
-    // An empty newKeyword removes it. Returns how many items changed. Counts as a person's edit, so
-    // the AI leaves those items' keywords alone afterwards.
+    // Renames a keyword on every item and location that has it; renaming it to one that exists merges
+    // the two. An empty newKeyword removes it. Returns how many items changed. Counts as a person's
+    // edit, so the AI leaves those items' keywords alone afterwards.
     public async Task<int> ReplaceKeywordAsync(string userId, Guid householdId, string keyword, string? newKeyword, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -312,8 +323,14 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         {
             var words = ItemKeywords.Split(item.Keywords).Select(k => k == word ? replacement : k).OfType<string>();
             item.Keywords = ItemKeywords.Join(words);
+            item.KeywordsFinal = true;
             item.UpdatedAt = now;
         }
+        var locations = await db.Locations
+            .Where(l => l.HouseholdId == householdId && l.Keywords != null && EF.Functions.Like(l.Keywords, "%" + word + "%"))
+            .ToListAsync(ct);
+        foreach (var location in locations.Where(l => ItemKeywords.Split(l.Keywords).Contains(word)))
+            location.Keywords = ItemKeywords.Merge(null, ItemKeywords.Split(location.Keywords).Select(k => k == word ? replacement : k).OfType<string>());
         await db.SaveChangesAsync(ct);
         return items.Count;
     }
@@ -375,6 +392,13 @@ public static class ItemKeywords
         string.IsNullOrEmpty(stored) ? [] : stored.Split(", ", StringSplitOptions.RemoveEmptyEntries);
 
     public static string Join(IEnumerable<string> words) => string.Join(", ", Clean(words));
+
+    // Adds to what's stored, which stays as it is (null too) when there's nothing to add.
+    public static string? Merge(string? stored, IEnumerable<string> more)
+    {
+        var added = more.ToList();
+        return added.Count == 0 ? stored : Join(Split(stored).Concat(added));
+    }
 }
 
 // Search text: lower case, accents removed, so "schlussel" finds "Schlüssel" and "cafe" finds "Café".

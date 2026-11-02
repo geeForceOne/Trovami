@@ -91,7 +91,7 @@ else
     private async Task RenameAsync()
     {
         var name = await Ui.Prompt.AskAsync($"Rename \"{Keyword}\"", "New keyword", Keyword, "Rename",
-            hint: $"Changes it on {Format.Count(_items.Count, "item", "items")}. A keyword that already exists merges with it.");
+            hint: $"Changes it on {Format.Count(_items.Count, "item", "items")} and on locations that add it. A keyword that already exists merges with it.");
         if (string.IsNullOrWhiteSpace(name) || ItemKeywords.Clean([name]).FirstOrDefault() is not { } clean || clean == Keyword)
             return;
         await ReplaceAsync(clean, $"Renamed to \"{clean}\".");
@@ -101,7 +101,7 @@ else
 
     private async Task RemoveAsync()
     {
-        if (!await Ui.Confirm.AskAsync($"Remove \"{Keyword}\"?", $"It's taken off {Format.Count(_items.Count, "item", "items")}. The items stay.", "Remove", danger: true))
+        if (!await Ui.Confirm.AskAsync($"Remove \"{Keyword}\"?", $"It's taken off {Format.Count(_items.Count, "item", "items")} and off locations that add it. The items stay.", "Remove", danger: true))
             return;
         await ReplaceAsync(null, $"Removed \"{Keyword}\".");
     }

@@ -68,6 +68,12 @@ public static class AiNamer
         "On the second line write \"Keywords:\" and up to 8 lowercase words or short phrases, separated by commas, " +
         "that someone might search for: its colors, material, kind of thing and what it's for, and the brand if it's visible. " +
         "For example: \"Keywords: blue, plastic, power tool, drilling, bosch\". Nothing else. " +
+        "Clothes, shoes, bags and other accessories need more, because people own many similar pieces. " +
+        "Their name has up to 6 words and says what sets this piece apart: its color, pattern, cut or style, and type, " +
+        "for example \"Red cable-knit crew-neck sweater\" or \"Navy striped linen midi dress\", never just \"Red pullover\". " +
+        "Their keywords go up to 14: the type and broader words for it (such as knitwear or top), colors, pattern, " +
+        "fabric, neckline, sleeves, fit or length, season and occasion, and the brand and size if a label shows them. " +
+        "Name a fabric only when the photo or a label makes it fairly clear. " +
         "If the message lists keywords the household already uses, take those wherever one fits, word for word, " +
         "and only add a new keyword when none of them says it; new keywords are in US English. " +
         "Some of the household's keywords may be in another language: reuse them as they are, " +

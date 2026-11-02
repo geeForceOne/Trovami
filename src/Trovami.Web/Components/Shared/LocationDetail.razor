@@ -98,6 +98,17 @@ else
                 <textarea class="textarea" rows="3" @bind="_edit.Notes" @bind:event="oninput" maxlength="@Location.MaxNotesLength"></textarea>
             </label>
             <div class="field">
+                <label for="location-keywords">Keywords</label>
+                <KeywordEditor @bind-Keywords="_edit.Keywords" @bind-Typed="_edit.TypedKeyword" InputId="location-keywords" />
+                <span class="field-hint">
+                    Items that arrive here or anywhere below get these. Items already here don't change. Separate them with a comma.
+                    @if (Tree.KeywordsFor(_node.ParentId) is { Count: > 0 } above)
+                    {
+                        <text> From the locations above, they also get: @string.Join(", ", above).</text>
+                    }
+                </span>
+            </div>
+            <div class="field">
                 <span>Photo</span>
                 <div class="actions">
                     <PhotoButton Label="@(_node.PhotoVersion is null ? "Add photo" : "Replace photo")" OnPhoto="SetPhotoAsync" Disabled="Busy" />
@@ -113,9 +124,16 @@ else
             </div>
         </form>
     }
-    else if (_node.Notes is not null)
+    else
     {
-        <p class="loc-notes">@_node.Notes</p>
+        @if (_node.Notes is not null)
+        {
+            <p class="loc-notes">@_node.Notes</p>
+        }
+        @if (Tree.KeywordsFor(_node.Id) is { Count: > 0 } added)
+        {
+            <p class="loc-keywords"><span class="muted small">Items arriving here get</span> <KeywordChips Keywords="added" Max="@Item.MaxKeywords" /></p>
+        }
     }
 
     @* Items *@
@@ -192,6 +210,8 @@ else
         public string? Label { get; set; }
         public string? Color { get; set; }
         public string? Notes { get; set; }
+        public List<string> Keywords { get; set; } = [];
+        public string TypedKeyword { get; set; } = "";
     }
 
     // Runs when another location is picked and whenever the page passes in a reloaded tree.
@@ -235,14 +255,15 @@ else
     {
         if (_node is null) return;
         _editing = !_editing;
-        _edit = new EditModel { Name = _node.Name, Kind = _node.Kind, Label = _node.Label, Color = _node.Color, Notes = _node.Notes };
+        _edit = new EditModel { Name = _node.Name, Kind = _node.Kind, Label = _node.Label, Color = _node.Color, Notes = _node.Notes, Keywords = _node.Keywords.ToList() };
     }
 
     private async Task SaveAsync()
     {
         if (await RunAsync(async () =>
         {
-            await Locations.UpdateAsync(await UserIdAsync(), Id, new LocationUpdate(_edit.Name, _edit.Kind, _edit.Notes, _edit.Color, _edit.Label), PageToken);
+            var keywords = ItemKeywords.Clean(_edit.Keywords.Append(_edit.TypedKeyword));
+            await Locations.UpdateAsync(await UserIdAsync(), Id, new LocationUpdate(_edit.Name, _edit.Kind, _edit.Notes, _edit.Color, _edit.Label, keywords), PageToken);
             _editing = false;
         }))
             await OnChanged.InvokeAsync();

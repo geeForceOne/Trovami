@@ -1,0 +1,30 @@
+@* Keywords as removable chips in a box that looks like an input, with the typing field last. A comma
+   ends a keyword; what's still being typed stays in Typed, for the form's Save to take. *@
+<div class="keywords">
+    @foreach (var k in Keywords)
+    {
+        <span class="keyword" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k}")" @onclick="() => RemoveAsync(k)"><Icon Name="x" Size="14" /></button></span>
+    }
+    @* No maxlength: typed fast or pasted, several keywords sit in the box before the commas split them. *@
+    <input id="@InputId" @bind:get="Typed" @bind:set="TypeAsync" @bind:event="oninput"
+           placeholder="@(Keywords.Count == 0 ? Placeholder : "Add")" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<string> Keywords { get; set; } = [];
+    [Parameter] public EventCallback<List<string>> KeywordsChanged { get; set; }
+    [Parameter] public string Typed { get; set; } = "";
+    [Parameter] public EventCallback<string> TypedChanged { get; set; }
+    [Parameter] public string InputId { get; set; } = "keyword-input";
+    [Parameter] public string Placeholder { get; set; } = "Add a keyword";
+
+    private async Task TypeAsync(string value)
+    {
+        var parts = value.Split(',');
+        if (parts.Length > 1)
+            await KeywordsChanged.InvokeAsync(ItemKeywords.Clean(Keywords.Concat(parts[..^1])).ToList());
+        await TypedChanged.InvokeAsync(parts[^1]);
+    }
+
+    private Task RemoveAsync(string word) => KeywordsChanged.InvokeAsync(Keywords.Where(k => k != word).ToList());
+}

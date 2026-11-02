@@ -8,9 +8,9 @@ namespace Trovami.Core.Services;
 // One location as the tree shows it. Items counts only what's directly in it.
 public sealed record LocationNode(
     Guid Id, string ShortCode, Guid? ParentId, string Name, LocationKind Kind, string? Color, string? Label, string? Notes,
-    string? PhotoVersion, int Items, int Tags);
+    string? PhotoVersion, int Items, int Tags, IReadOnlyList<string> Keywords);
 
-public sealed record LocationUpdate(string Name, LocationKind Kind, string? Notes, string? Color, string? Label);
+public sealed record LocationUpdate(string Name, LocationKind Kind, string? Notes, string? Color, string? Label, IReadOnlyList<string> Keywords);
 
 // The tree of a household's locations. Moving a location moves everything under it, since items
 // and sub-locations only point at their parent.
@@ -33,7 +33,7 @@ public sealed class LocationService(IDbContextFactory<AppDbContext> dbFactory, P
         var rows = await db.Locations.AsNoTracking().Where(l => l.HouseholdId == householdId).ToListAsync(ct);
         return new LocationTree(rows.Select(l => new LocationNode(
             l.Id, l.ShortCode, l.ParentId, l.Name, l.Kind, l.Color, l.Label, l.Notes, l.PhotoVersion,
-            items.GetValueOrDefault(l.Id), tags.GetValueOrDefault(l.Id))));
+            items.GetValueOrDefault(l.Id), tags.GetValueOrDefault(l.Id), ItemKeywords.Split(l.Keywords))));
     }
 
     // id: chosen by the client (the phone), or a new one. Creating the same id twice returns the
@@ -68,6 +68,7 @@ public sealed class LocationService(IDbContextFactory<AppDbContext> dbFactory, P
         location.Notes = Clean(update.Notes, Location.MaxNotesLength, "notes");
         location.Color = LocationColors.IsKnown(update.Color) ? update.Color : null;
         location.Label = Clean(update.Label, Location.MaxLabelLength, "label");
+        location.Keywords = ItemKeywords.Merge(null, update.Keywords);
         await db.SaveChangesAsync(ct);
     }
 
@@ -110,12 +111,14 @@ public sealed class LocationService(IDbContextFactory<AppDbContext> dbFactory, P
         if ((children.Count > 0 || items.Count > 0) && !moveContents)
             throw new InputException("This location isn't empty. Move what's in it first, or move it all up one level.");
 
+        var added = items.Count > 0 ? (await LoadTreeAsync(db, location.HouseholdId, ct)).KeywordsFor(location.ParentId) : [];
         var now = DateTime.UtcNow;
         foreach (var child in children)
             child.ParentId = location.ParentId;
         foreach (var item in items)
         {
             item.LocationId = location.ParentId;
+            item.Keywords = ItemKeywords.Merge(item.Keywords, added);
             item.UpdatedAt = now;
         }
         foreach (var tag in await db.Tags.Where(t => t.LocationId == id).ToListAsync(ct))
@@ -239,6 +242,10 @@ public sealed class LocationTree
                 stack.Push(child);
         }
     }
+
+    // What an item arriving at the location gets: the keywords of the location and all above it.
+    public IReadOnlyList<string> KeywordsFor(Guid? id) =>
+        id is { } i ? Ancestry(i).SelectMany(n => n.Keywords).Distinct().ToList() : [];
 
     // How many items are in the location and everything below it.
     public int ItemsBelow(Guid id) => Subtree(id).Sum(n => n.Items);

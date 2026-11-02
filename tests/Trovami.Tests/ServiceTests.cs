@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Trovami.Core;
 using Trovami.Core.Ai;
 using Trovami.Core.Models;
@@ -349,6 +352,225 @@ public class ServiceTests
         Assert.Equal(["tool", "blue", "metal"], namer.Known);
         Assert.StartsWith("What is this? Keywords this household already uses: tool, blue, metal", AiNamer.Question(namer.Known));
         Assert.Equal("What is this?", AiNamer.Question([]));
+    }
+
+    private static async Task SetKeywordsAsync(TestDb t, string userId, Guid location, params string[] keywords) =>
+        await t.Locations.UpdateAsync(userId, location, new LocationUpdate(
+            (await t.Locations.TreeAsync(userId, await HouseholdOfAsync(t, location))).Find(location)!.Name, LocationKind.Other, null, null, null, keywords));
+
+    private static async Task<Guid> HouseholdOfAsync(TestDb t, Guid location)
+    {
+        await using var db = t.Db.CreateDbContext();
+        return await db.Locations.Where(l => l.Id == location).Select(l => l.HouseholdId).FirstAsync();
+    }
+
+    [Fact]
+    public async Task AnItemArrivingAtALocationGetsItsKeywordsAndThoseAboveIt()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var cellar = await t.Locations.CreateAsync(anna, home, null, "Cellar", LocationKind.Cellar);
+        var box = await t.Locations.CreateAsync(anna, home, cellar, "Box", LocationKind.Box);
+        var plain = await t.Locations.CreateAsync(anna, home, null, "Attic", LocationKind.Attic);
+        await SetKeywordsAsync(t, anna, cellar, "Stored", "damp");
+        await SetKeywordsAsync(t, anna, box, "christmas", "stored");
+
+        // Added on the web or pushed by the phone.
+        var added = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(added, box, "Star", null));
+        Assert.Equal(["stored", "damp", "christmas"], (await t.Items.GetAsync(anna, added)).Keywords);
+        var pushed = Guid.NewGuid();
+        await t.Sync.PushAsync(anna, new SyncPush(null, null, [new PushItem(pushed, home, box, "Bauble", null, 1, false)]));
+        Assert.Equal(["stored", "damp", "christmas"], (await t.Items.GetAsync(anna, pushed)).Keywords);
+
+        // Moved in from the Inbox, next to what it has; moving away keeps them all.
+        var moved = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(moved, null, "Lights", null));
+        Assert.Empty((await t.Items.GetAsync(anna, moved)).Keywords);
+        await t.Items.UpdateAsync(anna, moved, "Lights", null, 1, ["electric"]);
+        await t.Items.MoveAsync(anna, [moved], cellar);
+        Assert.Equal(["electric", "stored", "damp"], (await t.Items.GetAsync(anna, moved)).Keywords);
+        await t.Items.MoveAsync(anna, [moved], plain);
+        Assert.Equal(["electric", "stored", "damp"], (await t.Items.GetAsync(anna, moved)).Keywords);
+
+        // Find and the keyword pages see them like any other keyword.
+        Assert.Equal(2, (await t.Items.SearchAsync(anna, home, "christmas")).Items.Count);
+        Assert.Contains(new KeywordCount("christmas", 2), await t.Items.KeywordsAsync(anna, home));
+    }
+
+    [Fact]
+    public async Task LocationKeywordsLeaveItemsAlreadyThereAndComeBackOnlyByMoving()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var box = await t.Locations.CreateAsync(anna, home, null, "Box", LocationKind.Box);
+        var other = await t.Locations.CreateAsync(anna, home, null, "Shelf", LocationKind.Shelf);
+
+        var early = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(early, box, "Early", null));
+        await SetKeywordsAsync(t, anna, box, "christmas");
+        Assert.Empty((await t.Items.GetAsync(anna, early)).Keywords);
+
+        // A person takes it off: saving or "moving" to the same place doesn't add it back.
+        var late = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(late, box, "Late", null));
+        await t.Items.UpdateAsync(anna, late, "Late", null, 1, []);
+        await t.Items.MoveAsync(anna, [late], box);
+        Assert.Empty((await t.Items.GetAsync(anna, late)).Keywords);
+
+        // Arriving again does.
+        await t.Items.MoveAsync(anna, [late], other);
+        await t.Items.MoveAsync(anna, [late], box);
+        Assert.Equal(["christmas"], (await t.Items.GetAsync(anna, late)).Keywords);
+    }
+
+    [Fact]
+    public async Task ItemsMovedUpByDeletingALocationGetTheKeywordsOfTheOneTheyLandIn()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var room = await t.Locations.CreateAsync(anna, home, null, "Room", LocationKind.Room);
+        var box = await t.Locations.CreateAsync(anna, home, room, "Box", LocationKind.Box);
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, box, "Star", null));
+        await SetKeywordsAsync(t, anna, room, "indoors");
+
+        await t.Locations.DeleteAsync(anna, box, moveContents: true);
+
+        Assert.Equal(["indoors"], (await t.Items.GetAsync(anna, item)).Keywords);
+    }
+
+    [Fact]
+    public async Task TheAiAddsItsKeywordsToThoseFromTheLocationButNotAfterAPersonsEdit()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var namer = new FixedNamer("Star", "gold", "christmas");
+        t.Naming.NamerFactory = (_, _, _) => namer;
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+        var box = await t.Locations.CreateAsync(anna, home, null, "Box", LocationKind.Box);
+        await SetKeywordsAsync(t, anna, box, "christmas", "fragile");
+
+        var merged = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(merged, box, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, merged, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(merged, default);
+        var a = await t.Items.GetAsync(anna, merged);
+        Assert.Equal(["christmas", "fragile", "gold"], a.Keywords);
+        Assert.Equal(AiNaming.NotNeeded, a.AiNaming);
+        // Location keywords count as known, even if no item had them yet.
+        Assert.Contains("fragile", namer.Known);
+
+        // A person's edit before the AI gets to it is final, and the AI doesn't come back later.
+        var edited = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(edited, box, "Bauble", null, PhotoExpected: true));
+        await t.Items.UpdateAsync(anna, edited, "Bauble", null, 1, ["christmas"]);
+        await t.Items.SetPhotoAsync(anna, edited, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(edited, default);
+        Assert.Equal(["christmas"], (await t.Items.GetAsync(anna, edited)).Keywords);
+
+        // Moving after the AI is done adds the location's, without asking the AI again.
+        await t.Items.MoveAsync(anna, [merged], null);
+        var shelf = await t.Locations.CreateAsync(anna, home, null, "Shelf", LocationKind.Shelf);
+        await SetKeywordsAsync(t, anna, shelf, "upstairs");
+        await t.Items.MoveAsync(anna, [merged], shelf);
+        var moved = await t.Items.GetAsync(anna, merged);
+        Assert.Equal(["christmas", "fragile", "gold", "upstairs"], moved.Keywords);
+        Assert.Equal(AiNaming.NotNeeded, moved.AiNaming);
+    }
+
+    [Fact]
+    public async Task AtTheKeywordLimitTheLocationsKeywordsAreKeptOverTheAis()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var fromAi = Enumerable.Range(1, 14).Select(i => $"ai{i}").ToArray();
+        t.Naming.NamerFactory = (_, _, _) => new FixedNamer("Red cable-knit crew-neck sweater", fromAi);
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+        var closet = await t.Locations.CreateAsync(anna, home, null, "Closet", LocationKind.Closet);
+        var fromLocation = Enumerable.Range(1, 10).Select(i => $"place{i}").ToArray();
+        await SetKeywordsAsync(t, anna, closet, fromLocation);
+
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, closet, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(item, default);
+
+        var keywords = (await t.Items.GetAsync(anna, item)).Keywords;
+        Assert.Equal(Item.MaxKeywords, keywords.Count);
+        Assert.Equal(fromLocation, keywords.Take(10));
+        Assert.Equal("ai10", keywords[^1]);
+    }
+
+    [Fact]
+    public async Task AFailedAiCallKeepsTheLocationKeywordsAndIsRetriedWithAKey()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var box = await t.Locations.CreateAsync(anna, home, null, "Box", LocationKind.Box);
+        await SetKeywordsAsync(t, anna, box, "christmas");
+
+        // No key yet, and a name typed: only the keywords are still open.
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, box, "Star", null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(item, default);
+        var failed = await t.Items.GetAsync(anna, item);
+        Assert.Equal(AiNaming.Failed, failed.AiNaming);
+        Assert.Equal(["christmas"], failed.Keywords);
+
+        t.Naming.NamerFactory = (_, _, _) => new FixedNamer("Ignored", "gold");
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+        await t.Naming.NameAsync(item, default);
+
+        var named = await t.Items.GetAsync(anna, item);
+        Assert.Equal("Star", named.Name);
+        Assert.Equal(["christmas", "gold"], named.Keywords);
+    }
+
+    [Fact]
+    public async Task RenamingOrRemovingAKeywordChangesTheLocationsThatAddItToo()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var box = await t.Locations.CreateAsync(anna, home, null, "Box", LocationKind.Box);
+        await SetKeywordsAsync(t, anna, box, "xmas", "old");
+
+        Assert.Equal(0, await t.Items.ReplaceKeywordAsync(anna, home, "xmas", "christmas"));
+        await t.Items.ReplaceKeywordAsync(anna, home, "old", null);
+
+        var tree = await t.Locations.TreeAsync(anna, home);
+        Assert.Equal(["christmas"], tree.Find(box)!.Keywords);
+        await t.Items.ReplaceKeywordAsync(anna, home, "christmas", null);
+        Assert.Empty((await t.Locations.TreeAsync(anna, home)).Find(box)!.Keywords);
+    }
+
+    [Fact]
+    public async Task ExistingKeywordsStayFinalAfterTheMigrationAndEmptyOnesStayOpenForTheAi()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var set = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(set, null, "Set", null));
+        await t.Items.UpdateAsync(anna, set, "Set", null, 1, ["blue"]);
+        await t.Items.CreateAsync(anna, home, new ItemCreate(open, null, "Open", null));
+
+        await using var db = t.Db.CreateDbContext();
+        var migrator = db.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261030144329_LabelSize");
+        await migrator.MigrateAsync();
+
+        Assert.True(await db.Items.Where(i => i.Id == set).Select(i => i.KeywordsFinal).FirstAsync());
+        Assert.False(await db.Items.Where(i => i.Id == open).Select(i => i.KeywordsFinal).FirstAsync());
     }
 
     private sealed class FixedNamer(string name, params string[] keywords) : IAiNamer

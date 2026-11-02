@@ -68,7 +68,7 @@ public sealed class AiNamingService(
         {
             var failed = await db.Items
                 .Where(i => i.HouseholdId == householdId && i.AiNaming == AiNaming.Failed && i.PhotoVersion != null
-                    && ((i.Name == null && i.NameSource != NameSource.Person) || i.Keywords == null))
+                    && ((i.Name == null && i.NameSource != NameSource.Person) || !i.KeywordsFinal))
                 .Select(i => i.Id).ToListAsync(ct);
             await db.Items.Where(i => failed.Contains(i.Id)).ExecuteUpdateAsync(s => s.SetProperty(i => i.AiNaming, AiNaming.Pending), ct);
             foreach (var id in failed)
@@ -104,7 +104,7 @@ public sealed class AiNamingService(
     }
 
     // The AI has something to do: a name (unless a person typed or cleared one), or keywords.
-    public static bool NeedsAi(Item item) => (item.Name is null && item.NameSource != NameSource.Person) || item.Keywords is null;
+    public static bool NeedsAi(Item item) => (item.Name is null && item.NameSource != NameSource.Person) || !item.KeywordsFinal;
 
     internal async Task NameAsync(Guid itemId, CancellationToken ct)
     {
@@ -132,13 +132,17 @@ public sealed class AiNamingService(
             return;
         }
 
-        // The household's keywords so far, so the AI reuses them instead of adding near-doubles.
+        // The household's keywords so far, on items and locations, so the AI reuses them instead of
+        // adding near-doubles.
         IReadOnlyList<string> known = [];
-        if (item.Keywords is null)
+        if (!item.KeywordsFinal)
         {
             var stored = await db.Items.AsNoTracking()
                 .Where(i => i.HouseholdId == item.HouseholdId && i.Keywords != null && i.Keywords != "")
                 .Select(i => i.Keywords).ToListAsync(ct);
+            stored.AddRange(await db.Locations.AsNoTracking()
+                .Where(l => l.HouseholdId == item.HouseholdId && l.Keywords != null)
+                .Select(l => l.Keywords).ToListAsync(ct));
             known = stored.SelectMany(ItemKeywords.Split).GroupBy(k => k)
                 .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
                 .Select(g => g.Key).Take(AiNamer.MaxKnownKeywords).ToList();
@@ -156,7 +160,7 @@ public sealed class AiNamingService(
             seen = new AiDescription(null, []);
         }
         var named = seen.Name is not null || item.Name is not null || item.NameSource == NameSource.Person;
-        var described = seen.Keywords.Count > 0 || item.Keywords is not null;
+        var described = seen.Keywords.Count > 0 || item.KeywordsFinal;
         await SetStateAsync(db, itemId, named && described ? AiNaming.NotNeeded : AiNaming.Failed, seen, ct);
     }
 
@@ -170,11 +174,22 @@ public sealed class AiNamingService(
                     .SetProperty(i => i.Name, seen.Name)
                     .SetProperty(i => i.NameSource, NameSource.Ai)
                     .SetProperty(i => i.UpdatedAt, now), ct);
-        if (seen.Keywords.Count > 0)
+        // Added to the keywords it got from its location. The item can move while the AI is looking,
+        // so they're read again here, and once more if that happens between the read and the write.
+        for (var attempt = 0; seen.Keywords.Count > 0 && attempt < 3; attempt++)
         {
-            var keywords = ItemKeywords.Join(seen.Keywords);
-            await db.Items.Where(i => i.Id == itemId && i.Keywords == null)
-                .ExecuteUpdateAsync(s => s.SetProperty(i => i.Keywords, keywords).SetProperty(i => i.UpdatedAt, now), ct);
+            var current = await db.Items.AsNoTracking().Where(i => i.Id == itemId && !i.KeywordsFinal)
+                .Select(i => new { i.Keywords }).FirstOrDefaultAsync(ct);
+            if (current is null)
+                break;
+            var keywords = ItemKeywords.Merge(current.Keywords, seen.Keywords);
+            var written = await db.Items.Where(i => i.Id == itemId && !i.KeywordsFinal && i.Keywords == current.Keywords)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(i => i.Keywords, keywords)
+                    .SetProperty(i => i.KeywordsFinal, true)
+                    .SetProperty(i => i.UpdatedAt, now), ct);
+            if (written > 0)
+                break;
         }
         await db.Items.Where(i => i.Id == itemId).ExecuteUpdateAsync(s => s.SetProperty(i => i.AiNaming, state), ct);
     }

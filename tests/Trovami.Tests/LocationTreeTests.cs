@@ -16,7 +16,7 @@ public class LocationTreeTests
     ]);
 
     private static LocationNode Node(Guid id, Guid? parent, string name, int items = 0) =>
-        new(id, ShortCodes.New(), parent, name, LocationKind.Other, null, null, null, null, items, 0);
+        new(id, ShortCodes.New(), parent, name, LocationKind.Other, null, null, null, null, items, 0, []);
 
     [Fact]
     public void PathGoesFromTheTopDown()

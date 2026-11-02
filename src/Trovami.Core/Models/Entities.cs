@@ -127,6 +127,10 @@ public sealed class Location : ISynced
     // What's written on the box, e.g. "B12".
     public string? Label { get; set; }
 
+    // Copied to items that arrive here or anywhere below, comma-separated like Item.Keywords. Items
+    // keep them when they move away, and adding one here doesn't change items already here.
+    public string? Keywords { get; set; }
+
     // Set when it has a photo: photos/<household>/<id>.jpg (see PhotoStore); changes with each new
     // photo, so browsers don't keep showing the old one.
     public string? PhotoVersion { get; set; }
@@ -162,9 +166,12 @@ public sealed class Item
     public string? Notes { get; set; }
     public int Quantity { get; set; } = 1;
 
-    // Words Find also matches (color, material, kind of thing), comma-separated. Null: not set yet,
-    // so the AI fills them in from the photo; once set, by the AI or a person, the AI leaves them.
+    // Words Find also matches (color, material, kind of thing), comma-separated. From its locations
+    // (see Location.Keywords), the AI (from the photo) and people.
     public string? Keywords { get; set; }
+
+    // The AI or a person has had their say, so the AI leaves the keywords alone from now on.
+    public bool KeywordsFinal { get; set; }
 
     // Set once the photo has arrived; see Location.PhotoVersion.
     public string? PhotoVersion { get; set; }

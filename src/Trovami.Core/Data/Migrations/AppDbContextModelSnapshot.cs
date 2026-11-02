@@ -448,6 +448,9 @@ namespace Trovami.Core.Data.Migrations
                         .HasMaxLength(840)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("KeywordsFinal")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("TEXT");
 
@@ -515,6 +518,10 @@ namespace Trovami.Core.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("HouseholdId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Keywords")
+                        .HasMaxLength(840)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Kind")
