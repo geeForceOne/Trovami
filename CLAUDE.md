@@ -91,4 +91,5 @@ Latest .NET (currently .NET 10, `net10.0`), Blazor Server, `.slnx` solution, plu
 - **Gotcha:** a component callback passed as a plain `Func<...>` (not EventCallback) doesn't re-render the parent; call StateHasChanged after it changes state.
 - **Gotcha:** don't name a component parameter `Assets`; it collides with `ComponentBase.Assets` in .NET 10.
 - **Gotcha:** the release APK is minified by R8, so a debug build proves little about it: anything created by reflection can break in release only (ML Kit's registrars crashed the QR scanner). Test Android changes on a release build before a release.
+- **Gotcha:** the app's `targetSdk` stays at 36 on purpose. At 37, Android 17 blocks the local network unless `ACCESS_LOCAL_NETWORK` is granted at runtime, which breaks pairing and sync with a server at home (the connection just times out). Don't raise it in a dependency update.
 - **Gotcha:** Blazor renders a bool attribute value `true` as an empty attribute and drops it for `false`; write `aria-pressed="@(x ? "true" : "false")"` (same for aria-expanded and aria-checked).
