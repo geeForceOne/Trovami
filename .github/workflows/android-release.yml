@@ -32,7 +32,7 @@ jobs:
 
       - name: Compute app version
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0"; fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.1"; fi
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
 
       # The keystore lives only in Actions secrets; it's written outside the checkout for this run.
