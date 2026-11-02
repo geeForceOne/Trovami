@@ -77,16 +77,8 @@ else
             </label>
             <div class="field">
                 <label for="keyword-input">Keywords</label>
-                <div class="keywords">
-                    @foreach (var k in _keywords)
-                    {
-                        <span class="keyword" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k}")" @onclick="() => RemoveKeyword(k)"><Icon Name="x" Size="14" /></button></span>
-                    }
-                    @* No maxlength: typed fast or pasted, several keywords sit in the box before the commas split them. *@
-                    <input id="keyword-input" @bind="NewKeyword" @bind:event="oninput"
-                           placeholder="@(_keywords.Count == 0 ? (_item.Naming ? "The AI is looking at it…" : "Add a keyword") : "Add")" />
-                </div>
-                <span class="field-hint">Find also matches these. The AI picks them from the photo; change them as you like. Separate them with a comma.</span>
+                <KeywordEditor @bind-Keywords="_keywords" @bind-Typed="_newKeyword" Placeholder="@(_item.Naming ? "The AI is looking at it…" : "Add a keyword")" />
+                <span class="field-hint">Find also matches these. They come from its location and from the AI, which picks them from the photo; change them as you like. Separate them with a comma.</span>
             </div>
             <div class="actions">
                 <button type="submit" class="btn btn-primary" disabled="@(Busy || !Changed)">Save</button>
@@ -126,20 +118,8 @@ else
     private string? _notes;
     private int _quantity = 1;
     private List<string> _keywords = [];
+    // What's still being typed; Enter (or Save) takes it, see SaveAsync.
     private string _newKeyword = "";
-
-    // A comma ends a keyword; Enter (or Save) takes what's left, see SaveAsync.
-    private string NewKeyword
-    {
-        get => _newKeyword;
-        set
-        {
-            var parts = value.Split(',');
-            foreach (var part in parts[..^1])
-                AddKeyword(part);
-            _newKeyword = parts[^1];
-        }
-    }
 
     private bool Changed => _item is not null &&
         ((_name ?? "").Trim() != (_item.Name ?? "") || (_notes ?? "").Trim() != (_item.Notes ?? "") || _quantity != _item.Quantity
@@ -149,8 +129,6 @@ else
     {
         _keywords = ItemKeywords.Clean(_keywords.Append(word)).ToList();
     }
-
-    private void RemoveKeyword(string word) => _keywords.Remove(word);
 
     protected override async Task OnParametersSetAsync()
     {

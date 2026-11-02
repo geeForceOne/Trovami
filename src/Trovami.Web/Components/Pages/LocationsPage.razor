@@ -280,7 +280,7 @@ else
             var newId = await Locations.CreateAsync(userId, Household!.Id, loc.ParentId, loc.Name, loc.Kind, ct: PageToken);
             id = newId;
             if (loc.Label is not null || loc.Color is not null)
-                await Locations.UpdateAsync(userId, newId, new LocationUpdate(loc.Name, loc.Kind, null, loc.Color, loc.Label), PageToken);
+                await Locations.UpdateAsync(userId, newId, new LocationUpdate(loc.Name, loc.Kind, null, loc.Color, loc.Label, []), PageToken);
         });
         if (id is not null)
         {

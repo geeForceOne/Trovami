@@ -979,6 +979,7 @@ td.num, th.num, .num.right { text-align: right; }
 .loc-title { flex: 1 1 260px; min-width: 0; }
 .loc-photo img { display: block; width: 72px; height: 72px; object-fit: cover; border-radius: var(--r-lg); border: 1px solid var(--rule); }
 .loc-notes { max-width: 70ch; margin: 0 0 22px; white-space: pre-wrap; color: var(--ink-soft); }
+.loc-keywords { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 22px; }
 .inline-panel {
     display: flex;
     flex-wrap: wrap;
