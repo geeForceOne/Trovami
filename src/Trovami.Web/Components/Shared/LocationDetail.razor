@@ -90,7 +90,7 @@ else
         <NamingWatcher Active="_below.Any(i => i.Naming)" OnTick="LoadAsync" />
         @if (_below.Count > 0)
         {
-            <ItemTable Items="_below" Tree="Tree" LocationId="_node.Id" Photos="!_table" />
+            <ItemTable Items="_below" Tree="Tree" LocationId="_node.Id" Photos="!_table" Scope="@_node.Id.ToString()" />
         }
         else
         {

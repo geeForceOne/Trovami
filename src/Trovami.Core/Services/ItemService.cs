@@ -21,6 +21,10 @@ public sealed record ItemView(
 // What the phone (or the web app's add form) sends for a new item. Id is chosen by the client.
 public sealed record ItemCreate(Guid Id, Guid? LocationId, string? Name, string? Notes, int Quantity = 1, bool PhotoExpected = false);
 
+// The items directly at the same location as one item, or in the Inbox with it: the short codes of the
+// ones before and after it in that list's order, and where it is in the list (from 1).
+public sealed record ItemNeighbors(string? Previous, string? Next, int Position, int Count);
+
 public sealed record KeywordCount(string Keyword, int Items, string? Color = null, bool Pinned = false);
 
 public sealed record SearchResult(IReadOnlyList<ItemView> Items, IReadOnlyList<LocationNode> Locations, LocationTree Tree);
@@ -65,6 +69,25 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             .Where(i => i.HouseholdId == householdId && i.LocationId == null)
             .OrderByDescending(i => i.CreatedAt).ToListAsync(ct);
         return rows.Select(i => View(i, tree)).ToList();
+    }
+
+    // Not the items in locations below it. The order is the location's list (A to Z) or the Inbox's.
+    public async Task<ItemNeighbors> NeighborsAsync(string userId, Guid id, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct)
+            ?? throw new NotFoundException("That item no longer exists.");
+        await Access.RequireMemberAsync(db, userId, item.HouseholdId, ct);
+        var rows = await db.Items.AsNoTracking()
+            .Where(i => i.HouseholdId == item.HouseholdId && i.LocationId == item.LocationId)
+            .Select(i => new { i.Id, i.ShortCode, i.Name, i.CreatedAt })
+            .ToListAsync(ct);
+        var ordered = (item.LocationId is null
+                ? rows.OrderByDescending(i => i.CreatedAt)
+                : rows.OrderBy(i => i.Name ?? ItemView.UnnamedText, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(i => i.CreatedAt))
+            .ThenBy(i => i.Id).ToList();
+        var at = ordered.FindIndex(i => i.Id == id);
+        return new ItemNeighbors(at > 0 ? ordered[at - 1].ShortCode : null, at < ordered.Count - 1 ? ordered[at + 1].ShortCode : null, at + 1, ordered.Count);
     }
 
     public async Task<int> InboxCountAsync(string userId, Guid householdId, CancellationToken ct = default)
@@ -185,7 +208,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         await db.SaveChangesAsync(ct);
     }
 
-    // Moves several items at once (the Inbox's multi-select); locationId null: to the Inbox. An item
+    // Moves several items at once (multi-select in the lists); locationId null: to the Inbox. An item
     // that arrives somewhere new gets that location's keywords and keeps the ones it has.
     public async Task MoveAsync(string userId, IReadOnlyCollection<Guid> ids, Guid? locationId, CancellationToken ct = default)
     {

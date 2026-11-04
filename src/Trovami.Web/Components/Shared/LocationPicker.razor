@@ -127,7 +127,7 @@
         var words = Search.Words(_text);
         var excluded = Exclude is { } e ? Tree.Subtree(e).Select(n => n.Id).ToHashSet() : [];
         var list = new List<Row>();
-        if (AllowInbox && Current is not null && words.All(w => "inbox".Contains(w)))
+        if (AllowInbox && words.All(w => "inbox".Contains(w)))
             list.Add(new Row(null, "Inbox", "", LocationKind.Other));
         if (words.Count == 0)
         {

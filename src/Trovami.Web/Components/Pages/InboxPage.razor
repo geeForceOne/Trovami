@@ -68,7 +68,7 @@
                                 </a>
                             </td>
                             <td data-label="Name" class="item-table-name">
-                                <label class="check inbox-row-check">
+                                <label class="check row-check">
                                     <input type="checkbox" checked="@selected" @onchange="e => Select(item.Id, e.Value is true)" aria-label="@($"Select {item.ShownName}")" />
                                     <a href="@($"i/{item.ShortCode}")" class="@(item.Name is null ? "muted" : "")">@(item.Naming ? "Naming…" : item.ShownName)</a>
                                 </label>

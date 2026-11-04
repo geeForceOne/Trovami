@@ -133,7 +133,7 @@
                             </label>
                             <label class="field">
                                 <span>API key</span>
-                                <input data-bwignore="true" class="input-secret input input-key" type="text" @bind="_key" @bind:event="oninput" autocomplete="off" spellcheck="false"
+                                <input data-bwignore="true" data-1p-ignore data-lpignore="true" data-form-type="other" class="input input-key" type="password" @bind="_key" @bind:event="oninput" autocomplete="new-password" spellcheck="false"
                                        placeholder="@(_ai.Key == SecretStatus.Set && _provider == _ai.Provider ? "Saved; type to replace it" : _provider == AiProvider.Claude ? "sk-ant-…" : "sk-…")" />
                                 @if (_ai.Key == SecretStatus.Unreadable && _provider == _ai.Provider)
                                 {

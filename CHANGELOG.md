@@ -1,5 +1,22 @@
 # Release notes
 
+## 1.2.0 - 2026-11-04
+
+### New
+
+- Select several items on a location's or keyword's page to move or delete them together.
+- The item page has buttons to go to the previous or next item at the same location.
+
+### Improved
+
+- After adding a location you stay where you are, with the new location visible in the tree.
+- The New location form starts with the kind you used last.
+- Inventory opens the location you last picked.
+
+### Fixed
+
+- Bitwarden no longer fills the mail server, backup and AI key passwords.
+
 ## 1.1.0 - 2026-11-04
 
 ### New

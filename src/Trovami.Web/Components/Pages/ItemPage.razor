@@ -13,21 +13,31 @@ else
 {
     <NamingWatcher Active="_item.Naming" OnTick="LoadAsync" />
 
-    <nav class="crumbs path" aria-label="Path">
-        @if (_item.LocationId is { } loc)
-        {
-            <a href="">Inventory</a>
-            @foreach (var a in _tree.Ancestry(loc))
+    <div class="item-top">
+        <nav class="crumbs path" aria-label="Path">
+            @if (_item.LocationId is { } loc)
             {
-                <span class="path-sep">›</span>
-                <a href="@($"l/{a.ShortCode}")">@a.Name</a>
+                <a href="">Inventory</a>
+                @foreach (var a in _tree.Ancestry(loc))
+                {
+                    <span class="path-sep">›</span>
+                    <a href="@($"l/{a.ShortCode}")">@a.Name</a>
+                }
             }
-        }
-        else
+            else
+            {
+                <a href="inbox">Inbox</a>
+            }
+        </nav>
+        @if (_neighbors is { Count: > 1 } n)
         {
-            <a href="inbox">Inbox</a>
+            <div class="item-pager">
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@(n.Previous is null)" title="Previous item" aria-label="Previous item" @onclick="() => GoToAsync(n.Previous)"><Icon Name="left" Size="16" /></button>
+                <span class="muted small">@($"{Format.Number(n.Position)} of {Format.Number(n.Count)}")</span>
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@(n.Next is null)" title="Next item" aria-label="Next item" @onclick="() => GoToAsync(n.Next)"><Icon Name="right" Size="16" /></button>
+            </div>
         }
-    </nav>
+    </div>
 
     <div class="item-page">
         <div class="item-big-photo">
@@ -95,7 +105,7 @@ else
                     <Icon Name="@(_item.LocationId is null ? "inbox" : "pin")" Size="16" />
                     <span>@_item.Path</span>
                 </div>
-                <LocationPicker Tree="_tree" AllowInbox="true" Current="_item.LocationId" Placeholder="Move to…" OnPick="MoveAsync" />
+                <LocationPicker Tree="_tree" AllowInbox="@(_item.LocationId is not null)" Current="_item.LocationId" Placeholder="Move to…" OnPick="MoveAsync" />
             </div>
 
             <p class="muted small">@($"Added {Format.Ago(_item.CreatedAt)}.")</p>
@@ -115,6 +125,7 @@ else
     private ItemView? _item;
     private bool _missing;
     private LocationTree _tree = new([]);
+    private ItemNeighbors? _neighbors;
     private string? _name;
     private string? _notes;
     private int _quantity = 1;
@@ -145,6 +156,7 @@ else
             if (Key != _item.ShortCode)
                 Nav.NavigateTo($"i/{_item.ShortCode}", replace: true);
             _tree = await Locations.TreeAsync(userId, _item.HouseholdId, PageToken);
+            _neighbors = await Items.NeighborsAsync(userId, _item.Id, PageToken);
             // The AI's name and keywords arrive while the page is open; show them unless the person
             // is typing or already added some.
             if (wasNaming && !_item.Naming && string.IsNullOrWhiteSpace(_name))
@@ -191,6 +203,14 @@ else
         await TryAsync(async () => await Items.SetKeywordsAsync(await UserIdAsync(), Id, keywords, PageToken));
         await LoadAsync();
         StateHasChanged();
+    }
+
+    // Replaces the history entry: the browser's Back leaves the items instead of stepping through them.
+    private async Task GoToAsync(string? code)
+    {
+        if (code is null || (Changed && !await Ui.Confirm.AskAsync("Discard your changes?", "What you changed on this item hasn't been saved.", "Discard", danger: true)))
+            return;
+        Nav.NavigateTo($"i/{code}", replace: true);
     }
 
     // Back to the page the item was opened from; after a direct link, to where the item is.

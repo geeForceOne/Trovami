@@ -1,9 +1,14 @@
-@inject NavigationManager Nav
+@inherits AppPage
+@inject ItemService ItemActions
 
 @* A location's items, everything in it and below it, as a table or (Photos) as photo cards:
    filtered as you type, sorted by the table's columns. "Where" is the path below the location,
-   empty for what's directly in it; the cards show it under the name. *@
-@{ var shown = Rows(); }
+   empty for what's directly in it; the cards show it under the name. Several can be selected to move
+   or delete them; only what the filter shows counts, so nothing hidden gets moved or deleted. *@
+@{
+    var shown = Rows();
+    var picked = shown.Where(x => _selected.Contains(x.Item.Id)).Select(x => x.Item.Id).ToList();
+}
 <div class="item-table-tools">
     <input data-bwignore="true" class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter items" autocomplete="off" spellcheck="false" />
     @if (LocationId is not null)
@@ -15,12 +20,27 @@
     <span class="muted small">@Summary(shown.Count)</span>
 </div>
 
+@if (shown.Count > 0)
+{
+    <div class="bulk-bar @(picked.Count > 0 ? "active" : "")">
+        <label class="check">
+            <input type="checkbox" checked="@(picked.Count == shown.Count)" @onchange="e => ToggleAll(shown, e.Value is true)" />
+            @(picked.Count > 0 ? $"{Format.Number(picked.Count)} selected" : "Select all")
+        </label>
+        @if (picked.Count > 0)
+        {
+            <LocationPicker Tree="Tree" AllowInbox="true" Placeholder="@($"Move {Format.Count(picked.Count, "item", "items")} to…")" OnPick="id => MoveAsync(picked, id)" />
+            <button type="button" class="btn btn-ghost btn-sm btn-danger-text" disabled="@Busy" @onclick="() => DeleteAsync(picked)"><Icon Name="trash" Size="16" /> Delete</button>
+        }
+    </div>
+}
+
 @if (shown.Count > 0 && Photos)
 {
     <div class="item-grid">
         @foreach (var (item, where) in shown)
         {
-            <ItemCard @key="item.Id" Item="item" PathText="@where" />
+            <ItemCard @key="item.Id" Item="item" PathText="@where" Selected="_selected.Contains(item.Id)" OnSelect="on => Select(item.Id, on)" />
         }
     </div>
 }
@@ -44,7 +64,8 @@ else if (shown.Count > 0)
             <tbody>
                 @foreach (var (item, where) in shown)
                 {
-                    <tr @key="item.Id" class="clickable" @onclick="() => Nav.NavigateTo(Link(item))">
+                    var selected = _selected.Contains(item.Id);
+                    <tr @key="item.Id" class="clickable @(selected ? "selected" : "")" @onclick="() => Nav.NavigateTo(Link(item))">
                         <td class="item-table-photo">
                             @if (item.PhotoVersion is { } v)
                             {
@@ -56,7 +77,10 @@ else if (shown.Count > 0)
                             }
                         </td>
                         <td data-label="Name" class="item-table-name">
-                            <a href="@Link(item)" class="@(item.Name is null ? "muted" : "")" @onclick:stopPropagation="true">@(item.Naming ? "Naming…" : item.ShownName)</a>
+                            <label class="check row-check" @onclick:stopPropagation="true">
+                                <input type="checkbox" checked="@selected" @onchange="e => Select(item.Id, e.Value is true)" aria-label="@($"Select {item.ShownName}")" />
+                                <a href="@Link(item)" class="@(item.Name is null ? "muted" : "")" @onclick:stopPropagation="true">@(item.Naming ? "Naming…" : item.ShownName)</a>
+                            </label>
                         </td>
                         <td data-label="Qty" class="num">@Format.Number(item.Quantity)</td>
                         <td data-label="Where">@where</td>
@@ -67,7 +91,7 @@ else if (shown.Count > 0)
                                 <div class="keyword-cell">
                                     @foreach (var k in item.Keywords)
                                     {
-                                        var color = Ui?.KeywordColors.GetValueOrDefault(k);
+                                        var color = Ui.KeywordColors.GetValueOrDefault(k);
                                         <span class="keyword @(color is null ? "" : "keyword-colored")" style="@Format.ColorVar(color)" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k} from {item.ShownName}")" @onclick="() => remove(item, k)"><Icon Name="x" Size="14" /></button></span>
                                     }
                                 </div>
@@ -97,7 +121,8 @@ else if (Items.Count > 0)
     // Set: the table also shows each item's keywords, whose x calls this.
     [Parameter] public Func<ItemView, string, Task>? RemoveKeyword { get; set; }
 
-    [CascadingParameter] private AppUi? Ui { get; set; }
+    // What the list is of; the selection starts over when it changes.
+    [Parameter] public string? Scope { get; set; }
 
     private enum Column { Name, Quantity, Where, Added }
 
@@ -105,6 +130,53 @@ else if (Items.Count > 0)
     private bool _directOnly;
     private Column _sort = Column.Name;
     private bool _descending;
+    private readonly HashSet<Guid> _selected = [];
+    private string? _selectedIn;
+
+    protected override void OnParametersSet()
+    {
+        if (Scope != _selectedIn)
+        {
+            _selectedIn = Scope;
+            _selected.Clear();
+        }
+        _selected.IntersectWith(Items.Select(i => i.Id));
+    }
+
+    private void Select(Guid id, bool on)
+    {
+        if (on) _selected.Add(id); else _selected.Remove(id);
+    }
+
+    private void ToggleAll(List<(ItemView Item, string Where)> shown, bool on)
+    {
+        if (on)
+            _selected.UnionWith(shown.Select(x => x.Item.Id));
+        else
+            _selected.ExceptWith(shown.Select(x => x.Item.Id));
+    }
+
+    // The refresh reloads the page around this list, which passes in the new items.
+    private async Task MoveAsync(IReadOnlyCollection<Guid> ids, Guid? locationId)
+    {
+        if (await RunAsync(async () => await ItemActions.MoveAsync(await UserIdAsync(), ids, locationId, PageToken)))
+        {
+            Ui.Toast.Success($"{Format.Count(ids.Count, "item", "items")} moved to {(locationId is null ? "the Inbox" : Tree.PathOf(locationId))}.");
+            _selected.ExceptWith(ids);
+            await Ui.RefreshAsync();
+        }
+    }
+
+    private async Task DeleteAsync(IReadOnlyCollection<Guid> ids)
+    {
+        if (!await Ui.Confirm.AskAsync($"Delete {Format.Count(ids.Count, "item", "items")}?", "They're removed with their photos for everyone in the household.", "Delete", danger: true))
+            return;
+        if (await RunAsync(async () => await ItemActions.DeleteAsync(await UserIdAsync(), ids, PageToken)))
+        {
+            _selected.ExceptWith(ids);
+            await Ui.RefreshAsync();
+        }
+    }
 
     private string Summary(int shown) => shown == Items.Count
         ? Format.Count(Items.Count, "item", "items")
