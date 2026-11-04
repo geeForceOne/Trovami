@@ -47,7 +47,7 @@ else
             </p>
         </div>
         <div class="page-actions">
-            <button type="button" class="btn btn-secondary btn-sm" aria-expanded="@(_editing ? "true" : "false")" @onclick="StartEdit"><Icon Name="edit" Size="16" /> Edit</button>
+            <button type="button" class="btn btn-secondary btn-sm" @onclick="EditAsync"><Icon Name="edit" Size="16" /> Edit</button>
             <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _moving = !_moving"><Icon Name="move" Size="16" /> Move</button>
             <button type="button" class="btn btn-ghost btn-sm btn-danger-text" @onclick="DeleteAsync"><Icon Name="trash" Size="16" /> Delete</button>
         </div>
@@ -66,75 +66,16 @@ else
         </div>
     }
 
-    @if (_editing)
+    @if (_node.Notes is not null)
     {
-        <form class="inline-panel loc-edit" @onsubmit="SaveAsync" @onsubmit:preventDefault="true">
-            <div class="field-row field-row-wrap">
-                <label class="field field-grow">
-                    <span>Name</span>
-                    <input class="input" @bind="_edit.Name" @bind:event="oninput" maxlength="@Location.MaxNameLength" />
-                </label>
-                <label class="field">
-                    <span>Kind</span>
-                    <KindSelect @bind-Value="_edit.Kind" />
-                </label>
-                <label class="field">
-                    <span>Label <span class="muted">(what's written on it)</span></span>
-                    <input class="input input-short input-code" @bind="_edit.Label" @bind:event="oninput" maxlength="@Location.MaxLabelLength" placeholder="B12" />
-                </label>
-            </div>
-            <div class="field">
-                <span>Color</span>
-                <div class="swatches" role="radiogroup" aria-label="Color">
-                    <button type="button" class="swatch swatch-none @(_edit.Color is null ? "on" : "")" role="radio" aria-checked="@(_edit.Color is null ? "true" : "false")" title="No color" @onclick="() => _edit.Color = null"><Icon Name="x" Size="14" /></button>
-                    @foreach (var (key, label) in LocationColors.All)
-                    {
-                        <button type="button" class="swatch @(_edit.Color == key ? "on" : "")" style="--loc:var(--c-@key)" role="radio" aria-checked="@(_edit.Color == key ? "true" : "false")" title="@label" aria-label="@label" @onclick="() => _edit.Color = key"></button>
-                    }
-                </div>
-            </div>
-            <label class="field">
-                <span>Notes <span class="muted">(an address, opening times, what's special)</span></span>
-                <textarea class="textarea" rows="3" @bind="_edit.Notes" @bind:event="oninput" maxlength="@Location.MaxNotesLength"></textarea>
-            </label>
-            <div class="field">
-                <label for="location-keywords">Keywords</label>
-                <KeywordEditor @bind-Keywords="_edit.Keywords" @bind-Typed="_edit.TypedKeyword" InputId="location-keywords" />
-                <span class="field-hint">
-                    Items that arrive here or anywhere below get these. Items already here don't change. Separate them with a comma.
-                    @if (Tree.KeywordsFor(_node.ParentId) is { Count: > 0 } above)
-                    {
-                        <text> From the locations above, they also get: @string.Join(", ", above).</text>
-                    }
-                </span>
-            </div>
-            <div class="field">
-                <span>Photo</span>
-                <div class="actions">
-                    <PhotoButton Label="@(_node.PhotoVersion is null ? "Add photo" : "Replace photo")" OnPhoto="SetPhotoAsync" Disabled="Busy" />
-                    @if (_node.PhotoVersion is not null)
-                    {
-                        <button type="button" class="btn btn-ghost btn-sm" @onclick="RemovePhotoAsync">Remove photo</button>
-                    }
-                </div>
-            </div>
-            <div class="actions">
-                <button type="submit" class="btn btn-primary" disabled="@(Busy || string.IsNullOrWhiteSpace(_edit.Name))">Save</button>
-                <button type="button" class="btn btn-ghost" @onclick="() => _editing = false">Cancel</button>
-            </div>
-        </form>
+        <p class="loc-notes">@_node.Notes</p>
     }
-    else
+    @if (Tree.KeywordsFor(_node.Id) is { Count: > 0 } added)
     {
-        @if (_node.Notes is not null)
-        {
-            <p class="loc-notes">@_node.Notes</p>
-        }
-        @if (Tree.KeywordsFor(_node.Id) is { Count: > 0 } added)
-        {
-            <p class="loc-keywords"><span class="muted small">Items arriving here get</span> <KeywordChips Keywords="added" Max="@Item.MaxKeywords" /></p>
-        }
+        <p class="loc-keywords"><span class="muted small">Items arriving here get</span> <KeywordChips Keywords="added" Max="@Item.MaxKeywords" /></p>
     }
+
+    <LocationDialog @ref="_dialog" />
 
     @* Items *@
     <section class="section">
@@ -199,20 +140,8 @@ else
     private bool _table;
     private IReadOnlyList<ItemView> _below = [];
     private IReadOnlyList<TagView> _tags = [];
-    private bool _editing;
     private bool _moving;
-    private EditModel _edit = new();
-
-    private sealed class EditModel
-    {
-        public string Name { get; set; } = "";
-        public LocationKind Kind { get; set; }
-        public string? Label { get; set; }
-        public string? Color { get; set; }
-        public string? Notes { get; set; }
-        public List<string> Keywords { get; set; } = [];
-        public string TypedKeyword { get; set; } = "";
-    }
+    private LocationDialog _dialog = default!;
 
     // Runs when another location is picked and whenever the page passes in a reloaded tree.
     protected override async Task OnParametersSetAsync()
@@ -220,7 +149,7 @@ else
         if (Id != _shownId)
         {
             _shownId = Id;
-            _editing = _moving = false;
+            _moving = false;
         }
         await LoadAsync();
     }
@@ -251,21 +180,31 @@ else
         await JS.InvokeVoidAsync("trovami.setPref", ViewPref, table ? "table" : "photos");
     }
 
-    private void StartEdit()
+    private async Task EditAsync()
     {
         if (_node is null) return;
-        _editing = !_editing;
-        _edit = new EditModel { Name = _node.Name, Kind = _node.Kind, Label = _node.Label, Color = _node.Color, Notes = _node.Notes, Keywords = _node.Keywords.ToList() };
+        _moving = false;
+        await _dialog.EditAsync(Tree, _node, SaveAsync, new LocationDialog.EditSteps(SaveKeywordsAsync, SetPhotoAsync, RemovePhotoAsync));
     }
 
-    private async Task SaveAsync()
+    private async Task<Guid?> SaveAsync(LocationDialog.Fields fields)
     {
-        if (await RunAsync(async () =>
+        var parent = _node?.ParentId;
+        if (!await RunAsync(async () =>
         {
-            var keywords = ItemKeywords.Clean(_edit.Keywords.Append(_edit.TypedKeyword));
-            await Locations.UpdateAsync(await UserIdAsync(), Id, new LocationUpdate(_edit.Name, _edit.Kind, _edit.Notes, _edit.Color, _edit.Label, keywords), PageToken);
-            _editing = false;
+            var userId = await UserIdAsync();
+            await Locations.UpdateAsync(userId, Id, new LocationUpdate(fields.Name, fields.Kind, fields.Notes, fields.Color, fields.Label, fields.Keywords), PageToken);
+            if (fields.ParentId != parent)
+                await Locations.MoveAsync(userId, Id, fields.ParentId, PageToken);
         }))
+            return null;
+        await OnChanged.InvokeAsync();
+        return Id;
+    }
+
+    private async Task SaveKeywordsAsync(List<string> keywords)
+    {
+        if (await TryAsync(async () => await Locations.SetKeywordsAsync(await UserIdAsync(), Id, keywords, PageToken)))
             await OnChanged.InvokeAsync();
     }
 
@@ -298,20 +237,24 @@ else
         }
     }
 
-    private async Task SetPhotoAsync(IBrowserFile file)
+    private async Task<bool> SetPhotoAsync(IBrowserFile file)
     {
-        if (await RunAsync(async () =>
+        if (!await RunAsync(async () =>
         {
             await using var stream = file.OpenReadStream(Trovami.Core.Photos.PhotoStore.MaxUploadBytes, PageToken);
             await Locations.SetPhotoAsync(await UserIdAsync(), Id, stream, PageToken);
         }))
-            await OnChanged.InvokeAsync();
+            return false;
+        await OnChanged.InvokeAsync();
+        return true;
     }
 
-    private async Task RemovePhotoAsync()
+    private async Task<bool> RemovePhotoAsync()
     {
-        if (await RunAsync(async () => await Locations.RemovePhotoAsync(await UserIdAsync(), Id, PageToken)))
-            await OnChanged.InvokeAsync();
+        if (!await RunAsync(async () => await Locations.RemovePhotoAsync(await UserIdAsync(), Id, PageToken)))
+            return false;
+        await OnChanged.InvokeAsync();
+        return true;
     }
 
     private async Task UnlinkAsync(TagView tag)

@@ -2,30 +2,34 @@
 @inject NavigationManager Nav
 @implements IDisposable
 
-@* The household in the sidebar; with several, a menu to switch between them. *@
+@* The current household, in the sidebar and the phone's top bar. Its menu switches between households
+   and leads to the household's settings and QR labels. *@
 @if (Ui.Household is { } current)
 {
     <div class="hh-switch">
         <button type="button" class="hh-button" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open"
-                disabled="@(Ui.Households.Count < 2)" title="@(Ui.Households.Count < 2 ? null : "Switch household")">
+                title="Household menu">
             <span class="hh-label">Household</span>
             <span class="hh-name">@current.Name</span>
-            @if (Ui.Households.Count > 1)
-            {
-                <Icon Name="chevrons" Size="16" />
-            }
+            <Icon Name="chevrons" Size="16" />
         </button>
         @if (_open)
         {
             <div class="menu-scrim" @onclick="() => _open = false"></div>
             <div class="menu-list hh-menu">
-                @foreach (var h in Ui.Households)
+                @if (Ui.Households.Count > 1)
                 {
-                    <button type="button" @onclick="() => SwitchAsync(h.Id)">
-                        <Icon Name="@(h.Id == current.Id ? "check" : "house")" Size="16" />
-                        <span>@h.Name</span>
-                    </button>
+                    @foreach (var h in Ui.Households)
+                    {
+                        <button type="button" @onclick="() => SwitchAsync(h.Id)">
+                            <Icon Name="@(h.Id == current.Id ? "check" : "house")" Size="16" />
+                            <span>@h.Name</span>
+                        </button>
+                    }
+                    <hr />
                 }
+                <a href="household" @onclick="() => _open = false"><Icon Name="users" Size="16" /> Household settings</a>
+                <a href="labels" @onclick="() => _open = false"><Icon Name="qr" Size="16" /> QR labels</a>
                 <hr />
                 <a href="household?new=1" @onclick="() => _open = false"><Icon Name="plus" Size="16" /> New household</a>
             </div>

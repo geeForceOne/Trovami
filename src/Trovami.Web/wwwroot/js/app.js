@@ -57,6 +57,53 @@ window.trovami = {
 
     focus: (selector) => document.querySelector(selector)?.focus(),
 
+    // Floats a keyword's suggestions over everything (a dialog scrolls what extends past it) next to
+    // its field: below it, or above when it doesn't fit there and there's more room above. Uses the
+    // visual viewport, which leaves out a phone's keyboard. Kept in place while the page scrolls.
+    placeKeywordList: (listId, inputId) => {
+        const list = document.getElementById(listId);
+        const box = document.getElementById(inputId)?.closest(".keywords");
+        if (!list || !box) return;
+        if (list.showPopover && !list.matches(":popover-open")) list.showPopover();
+        const place = () => {
+            if (!list.isConnected) {
+                window.removeEventListener("scroll", window.trovami.keywordListPlace, true);
+                window.visualViewport?.removeEventListener("resize", window.trovami.keywordListPlace);
+                window.trovami.keywordListPlace = null;
+                return;
+            }
+            const gap = 4, edge = 8;
+            const rect = box.getBoundingClientRect();
+            const height = window.visualViewport?.height ?? window.innerHeight;
+            list.style.maxHeight = "";
+            list.style.left = rect.left + "px";
+            list.style.width = rect.width + "px";
+            const wanted = list.offsetHeight;
+            const below = height - rect.bottom - gap - edge;
+            const above = rect.top - gap - edge;
+            // On a phone it goes wherever there's more room, as below it would cover Cancel and Save.
+            const up = above > below && (wanted > below || window.innerWidth <= 700);
+            const room = Math.max(up ? above : below, 60);
+            list.style.maxHeight = Math.min(wanted, room) + "px";
+            list.style.top = (up ? rect.top - gap - Math.min(wanted, room) : rect.bottom + gap) + "px";
+        };
+        if (window.trovami.keywordListPlace) {
+            window.removeEventListener("scroll", window.trovami.keywordListPlace, true);
+            window.visualViewport?.removeEventListener("resize", window.trovami.keywordListPlace);
+        }
+        window.trovami.keywordListPlace = place;
+        window.addEventListener("scroll", place, true);
+        window.visualViewport?.addEventListener("resize", place);
+        place();
+    },
+
     // Scrolls an element into view.
     scrollIntoView: (selector) => document.querySelector(selector)?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
 };
+
+// The height left beside a phone's keyboard, so a dialog and its fixed buttons stay above it.
+if (window.visualViewport) {
+    const setViewportHeight = () => document.documentElement.style.setProperty("--viewport-h", window.visualViewport.height + "px");
+    window.visualViewport.addEventListener("resize", setViewportHeight);
+    setViewportHeight();
+}

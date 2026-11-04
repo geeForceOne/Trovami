@@ -27,8 +27,16 @@
                             <span class="side-count">@Format.Number(_ui.InboxCount)</span>
                         }
                     </NavLink>
-                    <NavLink href="labels" ActiveClass="active"><Icon Name="qr" /><span>QR labels</span></NavLink>
-                    <NavLink href="household" ActiveClass="active"><Icon Name="users" /><span>Household</span></NavLink>
+                    @foreach (var k in _ui.PinnedKeywords)
+                    {
+                        <NavLink @key="k.Keyword" href="@KeywordDetail.KeywordLink(k.Keyword)" Match="NavLinkMatch.All" ActiveClass="active" title="@k.Keyword" class="@(k.Color is null ? "" : "side-keyword-colored")" style="@Format.ColorVar(k.Color)">
+                            <Icon Name="tag" /><span>@k.Keyword</span>
+                            @if (k.Items > 0)
+                            {
+                                <span class="side-count">@Format.Number(k.Items)</span>
+                            }
+                        </NavLink>
+                    }
                 </nav>
 
                 <div class="side-foot">
@@ -50,6 +58,7 @@
         </a>
         <AuthorizeView>
             <Authorized>
+                <HouseholdSwitcher />
                 <UserMenu Name="@AppClaimsPrincipalFactory.ShownName(context.User)" IsAdmin="@context.User.IsInRole(Roles.Admin)" Compact="true" />
             </Authorized>
             <NotAuthorized>
@@ -73,8 +82,6 @@
             <NavLink href="inbox" ActiveClass="active">
                 <span class="tab-icon"><Icon Name="inbox" Size="22" />@if (_ui.InboxCount > 0) {<span class="tab-dot"></span>}</span>Inbox
             </NavLink>
-            <NavLink href="labels" ActiveClass="active"><Icon Name="qr" Size="22" />Labels</NavLink>
-            <NavLink href="household" ActiveClass="active"><Icon Name="users" Size="22" />Household</NavLink>
         </nav>
     </AuthorizeView>
 </div>
@@ -96,9 +103,11 @@
 
     private readonly AppUi _ui = new();
     private string? _userId;
+    private string _uri = "";
 
     protected override async Task OnInitializedAsync()
     {
+        _uri = Nav.Uri;
         Nav.LocationChanged += OnLocationChanged;
         _ui.Reload = ReloadAsync;
         if (AuthState is not null && (await AuthState).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { } userId)
@@ -115,6 +124,30 @@
         _ui.Household = await Households.CurrentAsync(_userId);
         _ui.Invites = await Households.InvitesForAsync(_userId);
         _ui.InboxCount = _ui.Household is { } h ? await Items.InboxCountAsync(_userId, h.Id) : 0;
+        await LoadKeywordsAsync();
+    }
+
+    private async Task LoadKeywordsAsync()
+    {
+        if (_userId is null) return;
+        _ui.SetKeywords(_ui.Household is { } h ? await Items.KeywordsAsync(_userId, h.Id) : []);
+    }
+
+    // The counts next to pinned keywords change with what happens on any page (or the phone), so
+    // they're read again when moving on. If that doesn't work the old counts stay until the next time.
+    private async Task RefreshKeywordsAsync()
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadKeywordsAsync();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex) when (ex is NotFoundException or InputException or InvalidOperationException)
+        {
+        }
     }
 
     private async Task ReloadAsync()
@@ -144,8 +177,15 @@
         }
     }
 
-    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        var left = Nav.ToBaseRelativePath(_uri);
+        _uri = e.Location;
+        if (!left.StartsWith("i/"))
+            _ui.BeforeItem = left;
         _ = InvokeAsync(StateHasChanged);
+        _ = RefreshKeywordsAsync();
+    }
 
     public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
 }

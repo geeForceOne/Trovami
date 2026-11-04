@@ -256,12 +256,12 @@ public class ServiceTests
         // A typed name keeps its name but still gets keywords from the photo.
         var a = await t.Items.GetAsync(anna, typed);
         Assert.Equal("My drill", a.Name);
-        Assert.Equal(["blue", "power tool"], a.Keywords);
+        Assert.Equal(["blue", "power tool"], Described(a));
         Assert.Equal(AiNaming.NotNeeded, a.AiNaming);
         // A person set keywords first: the AI still names it, but leaves the keywords alone.
         var b = await t.Items.GetAsync(anna, edited);
         Assert.Equal("Cordless drill", b.Name);
-        Assert.Equal(["red", "garden"], b.Keywords);
+        Assert.Equal(["red", "garden"], Described(b));
 
         var found = await t.Items.SearchAsync(anna, home, "power tool");
         Assert.Equal(typed, Assert.Single(found.Items).Id);
@@ -290,7 +290,68 @@ public class ServiceTests
         Assert.Equal(1, await t.Items.ReplaceKeywordAsync(anna, home, "blue", null));
 
         Assert.Equal([new("metal", 2), new("tool", 2)], await t.Items.KeywordsAsync(anna, home));
-        Assert.Equal(["tool", "metal"], (await t.Items.GetAsync(anna, a)).Keywords);
+        Assert.Equal(["tool", "metal"], Described(await t.Items.GetAsync(anna, a)));
+    }
+
+    [Fact]
+    public async Task SavingOnlyKeywordsLeavesTheRestAloneAndStopsTheAi()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, null, "In the blue bag", 3));
+
+        await t.Items.SetKeywordsAsync(anna, item, ["Red ", "red", "garden"]);
+
+        var view = await t.Items.GetAsync(anna, item);
+        Assert.Equal(["red", "garden"], Described(view));
+        Assert.Null(view.Name);
+        Assert.NotEqual(NameSource.Person, view.NameSource);
+        Assert.Equal("In the blue bag", view.Notes);
+        Assert.Equal(3, view.Quantity);
+
+        await t.Items.SetKeywordsAsync(anna, item, []);
+        Assert.Empty(Described(await t.Items.GetAsync(anna, item)));
+
+        var cellar = await t.Locations.CreateAsync(anna, home, null, "Cellar", LocationKind.Cellar);
+        await t.Locations.SetKeywordsAsync(anna, cellar, ["Damp", "cold"]);
+        var node = (await t.Locations.TreeAsync(anna, home)).Find(cellar)!;
+        Assert.Equal(["damp", "cold"], node.Keywords);
+        Assert.Equal("Cellar", node.Name);
+    }
+
+    [Fact]
+    public async Task TheAiIsNotShownTheUnsureKeywordAsOneToReuse()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var seen = new List<IReadOnlyList<string>>();
+        t.Naming.NamerFactory = (_, _, _) => new RecordingNamer(seen);
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+
+        var earlier = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(earlier, null, "Odd thing", null));
+        await t.Items.SetKeywordsAsync(anna, earlier, [AiNamer.UnsureKeyword, "brass"]);
+
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(item, CancellationToken.None);
+
+        var known = Assert.Single(seen);
+        Assert.Contains("brass", known);
+        Assert.DoesNotContain(AiNamer.UnsureKeyword, known);
+    }
+
+    private sealed class RecordingNamer(List<IReadOnlyList<string>> seen) : IAiNamer
+    {
+        public Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct)
+        {
+            seen.Add(known);
+            return Task.FromResult(new AiDescription("Thing", ["metal"]));
+        }
     }
 
     [Fact]
@@ -302,7 +363,13 @@ public class ServiceTests
 
         var unknown = AiNamer.ParseReply("UNKNOWN\nKeywords: red");
         Assert.Null(unknown.Name);
-        Assert.Equal(["red"], unknown.Keywords);
+        Assert.Equal([AiNamer.UnsureKeyword, "red"], unknown.Keywords);
+        Assert.Equal([AiNamer.UnsureKeyword], AiNamer.ParseReply("UNKNOWN").Keywords);
+        Assert.Empty(AiNamer.ParseReply("").Keywords);
+
+        var guess = AiNamer.ParseReply("Old radio\nKeywords: brown, unsure");
+        Assert.Equal("Old radio", guess.Name);
+        Assert.Contains(AiNamer.UnsureKeyword, guess.Keywords);
 
         Assert.Empty(AiNamer.ParseReply("Passport").Keywords);
     }
@@ -379,20 +446,20 @@ public class ServiceTests
         // Added on the web or pushed by the phone.
         var added = Guid.NewGuid();
         await t.Items.CreateAsync(anna, home, new ItemCreate(added, box, "Star", null));
-        Assert.Equal(["stored", "damp", "christmas"], (await t.Items.GetAsync(anna, added)).Keywords);
+        Assert.Equal(["stored", "damp", "christmas"], Described(await t.Items.GetAsync(anna, added)));
         var pushed = Guid.NewGuid();
         await t.Sync.PushAsync(anna, new SyncPush(null, null, [new PushItem(pushed, home, box, "Bauble", null, 1, false)]));
-        Assert.Equal(["stored", "damp", "christmas"], (await t.Items.GetAsync(anna, pushed)).Keywords);
+        Assert.Equal(["stored", "damp", "christmas"], Described(await t.Items.GetAsync(anna, pushed)));
 
         // Moved in from the Inbox, next to what it has; moving away keeps them all.
         var moved = Guid.NewGuid();
         await t.Items.CreateAsync(anna, home, new ItemCreate(moved, null, "Lights", null));
-        Assert.Empty((await t.Items.GetAsync(anna, moved)).Keywords);
+        Assert.Empty(Described(await t.Items.GetAsync(anna, moved)));
         await t.Items.UpdateAsync(anna, moved, "Lights", null, 1, ["electric"]);
         await t.Items.MoveAsync(anna, [moved], cellar);
-        Assert.Equal(["electric", "stored", "damp"], (await t.Items.GetAsync(anna, moved)).Keywords);
+        Assert.Equal(["electric", "stored", "damp"], Described(await t.Items.GetAsync(anna, moved)));
         await t.Items.MoveAsync(anna, [moved], plain);
-        Assert.Equal(["electric", "stored", "damp"], (await t.Items.GetAsync(anna, moved)).Keywords);
+        Assert.Equal(["electric", "stored", "damp"], Described(await t.Items.GetAsync(anna, moved)));
 
         // Find and the keyword pages see them like any other keyword.
         Assert.Equal(2, (await t.Items.SearchAsync(anna, home, "christmas")).Items.Count);
@@ -411,19 +478,19 @@ public class ServiceTests
         var early = Guid.NewGuid();
         await t.Items.CreateAsync(anna, home, new ItemCreate(early, box, "Early", null));
         await SetKeywordsAsync(t, anna, box, "christmas");
-        Assert.Empty((await t.Items.GetAsync(anna, early)).Keywords);
+        Assert.Empty(Described(await t.Items.GetAsync(anna, early)));
 
         // A person takes it off: saving or "moving" to the same place doesn't add it back.
         var late = Guid.NewGuid();
         await t.Items.CreateAsync(anna, home, new ItemCreate(late, box, "Late", null));
         await t.Items.UpdateAsync(anna, late, "Late", null, 1, []);
         await t.Items.MoveAsync(anna, [late], box);
-        Assert.Empty((await t.Items.GetAsync(anna, late)).Keywords);
+        Assert.Empty(Described(await t.Items.GetAsync(anna, late)));
 
         // Arriving again does.
         await t.Items.MoveAsync(anna, [late], other);
         await t.Items.MoveAsync(anna, [late], box);
-        Assert.Equal(["christmas"], (await t.Items.GetAsync(anna, late)).Keywords);
+        Assert.Equal(["christmas"], Described(await t.Items.GetAsync(anna, late)));
     }
 
     [Fact]
@@ -440,7 +507,7 @@ public class ServiceTests
 
         await t.Locations.DeleteAsync(anna, box, moveContents: true);
 
-        Assert.Equal(["indoors"], (await t.Items.GetAsync(anna, item)).Keywords);
+        Assert.Equal(["indoors"], Described(await t.Items.GetAsync(anna, item)));
     }
 
     [Fact]
@@ -460,7 +527,7 @@ public class ServiceTests
         await t.Items.SetPhotoAsync(anna, merged, new MemoryStream(PhotoTests.Jpeg(40, 30)));
         await t.Naming.NameAsync(merged, default);
         var a = await t.Items.GetAsync(anna, merged);
-        Assert.Equal(["christmas", "fragile", "gold"], a.Keywords);
+        Assert.Equal(["christmas", "fragile", "gold"], Described(a));
         Assert.Equal(AiNaming.NotNeeded, a.AiNaming);
         // Location keywords count as known, even if no item had them yet.
         Assert.Contains("fragile", namer.Known);
@@ -471,7 +538,7 @@ public class ServiceTests
         await t.Items.UpdateAsync(anna, edited, "Bauble", null, 1, ["christmas"]);
         await t.Items.SetPhotoAsync(anna, edited, new MemoryStream(PhotoTests.Jpeg(40, 30)));
         await t.Naming.NameAsync(edited, default);
-        Assert.Equal(["christmas"], (await t.Items.GetAsync(anna, edited)).Keywords);
+        Assert.Equal(["christmas"], Described(await t.Items.GetAsync(anna, edited)));
 
         // Moving after the AI is done adds the location's, without asking the AI again.
         await t.Items.MoveAsync(anna, [merged], null);
@@ -479,7 +546,7 @@ public class ServiceTests
         await SetKeywordsAsync(t, anna, shelf, "upstairs");
         await t.Items.MoveAsync(anna, [merged], shelf);
         var moved = await t.Items.GetAsync(anna, merged);
-        Assert.Equal(["christmas", "fragile", "gold", "upstairs"], moved.Keywords);
+        Assert.Equal(["christmas", "fragile", "gold", "upstairs"], Described(moved));
         Assert.Equal(AiNaming.NotNeeded, moved.AiNaming);
     }
 
@@ -501,7 +568,7 @@ public class ServiceTests
         await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(40, 30)));
         await t.Naming.NameAsync(item, default);
 
-        var keywords = (await t.Items.GetAsync(anna, item)).Keywords;
+        var keywords = Described(await t.Items.GetAsync(anna, item));
         Assert.Equal(Item.MaxKeywords, keywords.Count);
         Assert.Equal(fromLocation, keywords.Take(10));
         Assert.Equal("ai10", keywords[^1]);
@@ -523,7 +590,7 @@ public class ServiceTests
         await t.Naming.NameAsync(item, default);
         var failed = await t.Items.GetAsync(anna, item);
         Assert.Equal(AiNaming.Failed, failed.AiNaming);
-        Assert.Equal(["christmas"], failed.Keywords);
+        Assert.Equal(["christmas"], Described(failed));
 
         t.Naming.NamerFactory = (_, _, _) => new FixedNamer("Ignored", "gold");
         await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
@@ -531,7 +598,7 @@ public class ServiceTests
 
         var named = await t.Items.GetAsync(anna, item);
         Assert.Equal("Star", named.Name);
-        Assert.Equal(["christmas", "gold"], named.Keywords);
+        Assert.Equal(["christmas", "gold"], Described(named));
     }
 
     [Fact]
@@ -563,8 +630,9 @@ public class ServiceTests
         await t.Items.CreateAsync(anna, home, new ItemCreate(set, null, "Set", null));
         await t.Items.UpdateAsync(anna, set, "Set", null, 1, ["blue"]);
         await t.Items.CreateAsync(anna, home, new ItemCreate(open, null, "Open", null));
-
         await using var db = t.Db.CreateDbContext();
+        // Items from before the migration have no "new", or anything else.
+        await db.Items.Where(i => i.Id == open).ExecuteUpdateAsync(u => u.SetProperty(i => i.Keywords, (string?)null));
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("20261030144329_LabelSize");
         await migrator.MigrateAsync();
@@ -572,6 +640,220 @@ public class ServiceTests
         Assert.True(await db.Items.Where(i => i.Id == set).Select(i => i.KeywordsFinal).FirstAsync());
         Assert.False(await db.Items.Where(i => i.Id == open).Select(i => i.KeywordsFinal).FirstAsync());
     }
+
+    [Fact]
+    public async Task EveryItemAddedGetsNewAndTakingItOffLeavesTheAiFree()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var box = await t.Locations.CreateAsync(anna, home, null, "Box", LocationKind.Box);
+        await SetKeywordsAsync(t, anna, box, "christmas");
+
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, box, null, null, PhotoExpected: true));
+        Assert.Equal([ItemKeywords.New, "christmas"], (await t.Items.GetAsync(anna, item)).Keywords);
+
+        // Taken off by hand, and by removing the keyword everywhere: neither stops the AI.
+        await t.Items.SetKeywordsAsync(anna, item, ["christmas"]);
+        await t.Items.SetKeywordsAsync(anna, item, [ItemKeywords.New, "christmas"]);
+        await t.Items.ReplaceKeywordAsync(anna, home, ItemKeywords.New, null);
+        t.Naming.NamerFactory = (_, _, _) => new FixedNamer("Bauble", "gold");
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+        await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(item, default);
+        Assert.Equal(["christmas", "gold"], (await t.Items.GetAsync(anna, item)).Keywords);
+    }
+
+    [Fact]
+    public async Task NewAndUnsureAreNotOfferedToTheAiAndItCantAddNew()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        await t.Items.CreateAsync(anna, home, new ItemCreate(Guid.NewGuid(), null, "Earlier", null));
+        var namer = new FixedNamer("Lamp", "brass");
+        t.Naming.NamerFactory = (_, _, _) => namer;
+        await t.Naming.SaveSettingsAsync(anna, home, AiProvider.Claude, null, "sk-test");
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, null, null, PhotoExpected: true));
+        await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(40, 30)));
+        await t.Naming.NameAsync(item, default);
+
+        Assert.DoesNotContain(ItemKeywords.New, namer.Known);
+        Assert.DoesNotContain(ItemKeywords.New, AiNamer.ParseReply("Lamp\nKeywords: new, brass").Keywords);
+    }
+
+    [Fact]
+    public async Task NewComesOffAfterTheHouseholdsDaysUnlessThatIsOff()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var kept = await t.Households.CreateAsync(anna, "Kept");
+        await t.Households.SetNewKeywordDaysAsync(anna, kept, 0);
+        var old = Guid.NewGuid();
+        var recent = Guid.NewGuid();
+        var oldKept = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(old, null, "Old", null));
+        await t.Items.SetKeywordsAsync(anna, old, [ItemKeywords.New, "newspaper"]);
+        await t.Items.CreateAsync(anna, home, new ItemCreate(recent, null, "Recent", null));
+        await t.Items.CreateAsync(anna, kept, new ItemCreate(oldKept, null, "Old too", null));
+        await using (var db = t.Db.CreateDbContext())
+        {
+            var longAgo = DateTime.UtcNow.AddDays(-Household.DefaultNewKeywordDays - 1);
+            await db.Items.Where(i => i.Id == old || i.Id == oldKept).ExecuteUpdateAsync(u => u.SetProperty(i => i.CreatedAt, longAgo));
+        }
+
+        Assert.Equal(1, await t.Items.RemoveExpiredNewKeywordAsync());
+
+        Assert.Equal(["newspaper"], (await t.Items.GetAsync(anna, old)).Keywords);
+        Assert.Equal([ItemKeywords.New], (await t.Items.GetAsync(anna, recent)).Keywords);
+        Assert.Equal([ItemKeywords.New], (await t.Items.GetAsync(anna, oldKept)).Keywords);
+    }
+
+    [Fact]
+    public async Task OnlyTheOwnerSetsTheDaysForNewWithinTheLimits()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var ben = await t.AddUserAsync("ben");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        Assert.Equal(Household.DefaultNewKeywordDays, (await t.Households.ListAsync(anna)).Single().NewKeywordDays);
+
+        await t.Households.SetNewKeywordDaysAsync(anna, home, 7);
+        Assert.Equal(7, (await t.Households.ListAsync(anna)).Single().NewKeywordDays);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => t.Households.SetNewKeywordDaysAsync(ben, home, 3));
+        await Assert.ThrowsAsync<InputException>(() => t.Households.SetNewKeywordDaysAsync(anna, home, -1));
+        await Assert.ThrowsAsync<InputException>(() => t.Households.SetNewKeywordDaysAsync(anna, home, Household.MaxNewKeywordDays + 1));
+    }
+
+    [Fact]
+    public void NewAndUnsureDontCountAgainstTheKeywordLimit()
+    {
+        var many = Enumerable.Range(1, Item.MaxKeywords + 5).Select(i => $"word{i}").ToList();
+        var kept = ItemKeywords.Clean([ItemKeywords.New, .. many, AiNamer.UnsureKeyword]);
+
+        Assert.Equal(Item.MaxKeywords + 2, kept.Count);
+        Assert.Equal(ItemKeywords.New, kept[0]);
+        Assert.Equal($"word{Item.MaxKeywords}", kept[^2]);
+        Assert.Equal(AiNamer.UnsureKeyword, kept[^1]);
+    }
+
+    [Theory]
+    [InlineData("Unsure lava lamp", "Lava lamp")]
+    [InlineData("unsure: lava lamp", "Lava lamp")]
+    [InlineData("Lava lamp (unsure)", "Lava lamp")]
+    [InlineData("Lava lamp - unsure", "Lava lamp")]
+    public void UnsureInTheNameBecomesTheKeyword(string name, string expected)
+    {
+        var reply = AiNamer.ParseReply($"{name}\nKeywords: blue, glowing");
+
+        Assert.Equal(expected, reply.Name);
+        Assert.Equal([AiNamer.UnsureKeyword, "blue", "glowing"], reply.Keywords);
+    }
+
+    [Fact]
+    public void UnsureAloneIsNoNameAndOtherWordsInNamesStay()
+    {
+        var alone = AiNamer.ParseReply("Unsure\nKeywords: blue");
+        Assert.Null(alone.Name);
+        Assert.Equal([AiNamer.UnsureKeyword, "blue"], alone.Keywords);
+
+        var sure = AiNamer.ParseReply("Unsurfaced board\nKeywords: wood");
+        Assert.Equal("Unsurfaced board", sure.Name);
+        Assert.Equal(["wood"], sure.Keywords);
+    }
+
+    [Fact]
+    public async Task APinnedKeywordStaysWithoutItemsAndAColorLastsUntilItsRemoved()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, "Lamp", null));
+        await t.Items.SetKeywordsAsync(anna, item, ["pinned", "colored"]);
+        await t.Items.SetKeywordPinnedAsync(anna, home, "Pinned", true);
+        await t.Items.SetKeywordColorAsync(anna, home, "colored", "blue");
+
+        var keywords = await t.Items.KeywordsAsync(anna, home);
+        Assert.Contains(new KeywordCount("pinned", 1, null, true), keywords);
+        Assert.Contains(new KeywordCount("colored", 1, "blue", false), keywords);
+
+        // Removed: the pinned one stays with no items, the other is gone with its color.
+        await t.Items.ReplaceKeywordAsync(anna, home, "pinned", null);
+        await t.Items.ReplaceKeywordAsync(anna, home, "colored", null);
+        Assert.Equal([new KeywordCount("pinned", 0, null, true)], await t.Items.KeywordsAsync(anna, home));
+        await using (var db = t.Db.CreateDbContext())
+            Assert.Equal(1, await db.KeywordSettings.CountAsync());
+
+        // Neither a color nor a pin left: nothing is kept.
+        await t.Items.SetKeywordPinnedAsync(anna, home, "pinned", false);
+        Assert.Empty(await t.Items.KeywordsAsync(anna, home));
+        await using (var db = t.Db.CreateDbContext())
+            Assert.Equal(0, await db.KeywordSettings.CountAsync());
+    }
+
+    [Fact]
+    public async Task AnUnknownColorIsNoColorAndOthersCantChangeAHouseholdsKeywords()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var ben = await t.AddUserAsync("ben");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        await t.Items.SetKeywordPinnedAsync(anna, home, "tools", true);
+        await t.Items.SetKeywordColorAsync(anna, home, "tools", "url(evil)");
+
+        Assert.Null((await t.Items.KeywordsAsync(anna, home)).Single().Color);
+        await Assert.ThrowsAnyAsync<Exception>(() => t.Items.SetKeywordPinnedAsync(ben, home, "tools", false));
+        await Assert.ThrowsAnyAsync<Exception>(() => t.Items.KeywordsAsync(ben, home));
+        await Assert.ThrowsAsync<InputException>(() => t.Items.SetKeywordPinnedAsync(anna, home, "  ", true));
+    }
+
+    [Fact]
+    public async Task RenamingAndMergingTakeTheColorAndPinAlong()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, "Lamp", null));
+        await t.Items.SetKeywordsAsync(anna, item, ["old", "other"]);
+        await t.Items.SetKeywordColorAsync(anna, home, "old", "red");
+        await t.Items.SetKeywordPinnedAsync(anna, home, "old", true);
+        await t.Items.SetKeywordColorAsync(anna, home, "other", "blue");
+
+        await t.Items.ReplaceKeywordAsync(anna, home, "old", "renamed");
+        Assert.Contains(new KeywordCount("renamed", 1, "red", true), await t.Items.KeywordsAsync(anna, home));
+
+        // Into one that exists: its own color wins, and the pin carries over.
+        await t.Items.ReplaceKeywordAsync(anna, home, "renamed", "other");
+        Assert.Equal([new KeywordCount("other", 1, "blue", true)], await t.Items.KeywordsAsync(anna, home));
+    }
+
+    [Fact]
+    public async Task SuggestionsAlsoHaveTheKeywordsOnlyOnLocations()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var box = await t.Locations.CreateAsync(anna, home, null, "Box", LocationKind.Box);
+        await SetKeywordsAsync(t, anna, box, "stored");
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, "Lamp", null));
+        await t.Items.SetKeywordsAsync(anna, item, ["brass"]);
+
+        var suggestions = await t.Items.KeywordSuggestionsAsync(anna, home);
+
+        Assert.Contains(new KeywordCount("brass", 1), suggestions);
+        Assert.Contains(new KeywordCount("stored", 0), suggestions);
+        Assert.DoesNotContain(new KeywordCount("stored", 0), await t.Items.KeywordsAsync(anna, home));
+    }
+
+    // What describes the item, leaving out the "new" every added item starts with.
+    private static IReadOnlyList<string> Described(ItemView item) => item.Keywords.Where(k => k != ItemKeywords.New).ToList();
 
     private sealed class FixedNamer(string name, params string[] keywords) : IAiNamer
     {

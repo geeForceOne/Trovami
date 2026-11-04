@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -65,6 +66,8 @@ public static class AiNamer
         "for example \"Cordless drill\", \"Christmas lights\", \"Passport\", \"Winter boots\". " +
         "Name the main thing in the photo; mention the brand only when it helps to tell it apart. " +
         "Put the name alone on the first line, no punctuation at the end; if you can't tell what it is, write exactly UNKNOWN there. " +
+        "If you have a guess but aren't fairly sure what it is, write your best guess as the name and include the keyword \"unsure\". " +
+        "Never put the word unsure in the name itself: that word goes only in the keywords, and for nothing else. " +
         "On the second line write \"Keywords:\" and up to 8 lowercase words or short phrases, separated by commas, " +
         "that someone might search for: its colors, material, kind of thing and what it's for, and the brand if it's visible. " +
         "For example: \"Keywords: blue, plastic, power tool, drilling, bosch\". Nothing else. " +
@@ -82,6 +85,9 @@ public static class AiNamer
     // The household's keywords that go along with the photo; more would cost tokens on every photo.
     public const int MaxKnownKeywords = 200;
 
+    // On an item when the AI isn't sure what it is, so such items can be found and checked.
+    public const string UnsureKeyword = "unsure";
+
     // The text sent with the photo.
     internal static string Question(IReadOnlyList<string> known) => known.Count == 0
         ? "What is this?"
@@ -94,14 +100,24 @@ public static class AiNamer
         _ => throw new AiException("AI naming is off for this household."),
     };
 
+    // "Unsure lava lamp" or "Lava lamp (unsure)": the AI does that despite being told not to.
+    private static readonly Regex UnsureInName = new(@"^\W*unsure\b\W*|\W*\bunsure\W*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     // The reply's name line and "Keywords:" line, in whichever order they came.
     public static AiDescription ParseReply(string? reply)
     {
         var lines = (reply ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(l => l.Trim('*', ' ')).ToList();
         var keywordLine = lines.FirstOrDefault(l => l.StartsWith("Keywords:", StringComparison.OrdinalIgnoreCase));
-        var name = CleanReply(lines.FirstOrDefault(l => l != keywordLine));
-        return new AiDescription(name, keywordLine is null ? [] : ItemKeywords.Clean(keywordLine["Keywords:".Length..].Split(',')));
+        var nameLine = lines.FirstOrDefault(l => l != keywordLine) ?? "";
+        var withoutUnsure = UnsureInName.Replace(nameLine, "");
+        var name = CleanReply(withoutUnsure);
+        IEnumerable<string> keywords = keywordLine is null ? [] : keywordLine["Keywords:".Length..].Split(',');
+        // A reply without a usable name means it couldn't tell.
+        if ((name is null && lines.Count > 0) || withoutUnsure != nameLine)
+            keywords = keywords.Prepend(UnsureKeyword);
+        // "New" from the AI would describe the thing's looks; the keyword means newly added.
+        return new AiDescription(name, ItemKeywords.Clean(keywords).Where(k => k != ItemKeywords.New).ToList());
     }
 
     // A name line without quotes or a closing period; null for UNKNOWN or nothing usable.

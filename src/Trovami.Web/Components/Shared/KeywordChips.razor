@@ -4,7 +4,8 @@
     <span class="keyword-chips" title="@string.Join(", ", Keywords)">
         @foreach (var k in Keywords.Take(Max))
         {
-            <span class="keyword-chip">@k</span>
+            var color = Ui?.KeywordColors.GetValueOrDefault(k);
+            <span class="keyword-chip @(color is null ? "" : "keyword-colored")" style="@Format.ColorVar(color)">@k</span>
         }
         @if (Keywords.Count > Max)
         {
@@ -16,4 +17,6 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<string> Keywords { get; set; } = [];
     [Parameter] public int Max { get; set; } = 4;
+
+    [CascadingParameter] private AppUi? Ui { get; set; }
 }

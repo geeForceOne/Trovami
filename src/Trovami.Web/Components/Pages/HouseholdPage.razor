@@ -31,7 +31,7 @@
                 </div>
                 <div class="setting-body">
                     <form class="inline-add" @onsubmit="RenameAsync" @onsubmit:preventDefault="true">
-                        <input class="input" @bind="_name" @bind:event="oninput" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
+                        <input data-bwignore="true" class="input" @bind="_name" @bind:event="oninput" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
                         <button type="submit" class="btn btn-secondary" disabled="@(Busy || string.IsNullOrWhiteSpace(_name) || _name.Trim() == household.Name)">Rename</button>
                     </form>
                 </div>
@@ -79,11 +79,11 @@
                         <div class="field-row field-row-wrap">
                             <label class="field field-grow">
                                 <span>Email address</span>
-                                <input class="input" type="email" @bind="_inviteEmail" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+                                <input data-bwignore="true" class="input" type="text" inputmode="email" @bind="_inviteEmail" @bind:event="oninput" autocomplete="off" spellcheck="false" />
                             </label>
                             <label class="field field-grow">
                                 <span>Name <span class="muted">(if they're new to @AppInfo.Name)</span></span>
-                                <input class="input" @bind="_inviteName" @bind:event="oninput" maxlength="@AppUser.MaxDisplayNameLength" autocomplete="off" />
+                                <input data-bwignore="true" class="input" @bind="_inviteName" @bind:event="oninput" maxlength="@AppUser.MaxDisplayNameLength" autocomplete="off" />
                             </label>
                         </div>
                         <div class="actions">
@@ -95,7 +95,7 @@
                                 @_inviteResult.Message
                                 @if (_inviteResult.Link is not null)
                                 {
-                                    <div class="link-copy"><input class="input input-code" readonly value="@_inviteResult.Link" /></div>
+                                    <div class="link-copy"><input data-bwignore="true" class="input input-code" readonly value="@_inviteResult.Link" /></div>
                                 }
                             </div>
                         }
@@ -133,7 +133,7 @@
                             </label>
                             <label class="field">
                                 <span>API key</span>
-                                <input class="input input-key" type="password" @bind="_key" @bind:event="oninput" autocomplete="off" spellcheck="false"
+                                <input data-bwignore="true" class="input-secret input input-key" type="text" @bind="_key" @bind:event="oninput" autocomplete="off" spellcheck="false"
                                        placeholder="@(_ai.Key == SecretStatus.Set && _provider == _ai.Provider ? "Saved; type to replace it" : _provider == AiProvider.Claude ? "sk-ant-…" : "sk-…")" />
                                 @if (_ai.Key == SecretStatus.Unreadable && _provider == _ai.Provider)
                                 {
@@ -145,6 +145,28 @@
                                 </span>
                             </label>
                         }
+                        <div class="actions">
+                            <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        }
+
+        @if (household.IsOwner)
+        {
+            <section class="setting">
+                <div class="setting-intro">
+                    <h2>New items</h2>
+                    <p>Every item added gets the keyword "new", so you can go through what came in. Take it off by hand, or let it come off by itself after a while.</p>
+                </div>
+                <div class="setting-body">
+                    <form class="form" @onsubmit="SaveNewKeywordDaysAsync" @onsubmit:preventDefault="true">
+                        <label class="field">
+                            <span>Remove "new" after this many days</span>
+                            <input data-bwignore="true" class="input input-short" type="number" min="1" max="@Trovami.Core.Models.Household.MaxNewKeywordDays" @bind="_newKeywordDays" @bind:event="oninput" autocomplete="off" />
+                            <span class="field-hint">Leave it empty to keep "new" until it's removed by hand.</span>
+                        </label>
                         <div class="actions">
                             <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
                         </div>
@@ -180,7 +202,7 @@
         </div>
         <div class="setting-body">
             <form class="inline-add" @onsubmit="CreateAsync" @onsubmit:preventDefault="true">
-                <input class="input" @bind="_newName" @bind:event="oninput" placeholder="Name" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="New household name" autofocus="@New" />
+                <input data-bwignore="true" class="input" @bind="_newName" @bind:event="oninput" placeholder="Name" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="New household name" autofocus="@New" />
                 <button type="submit" class="btn btn-secondary" disabled="@(Busy || string.IsNullOrWhiteSpace(_newName))"><Icon Name="plus" Size="16" /> Create</button>
             </form>
         </div>
@@ -201,6 +223,7 @@
     private string _model = "";
     private string _key = "";
     private string _newName = "";
+    private int? _newKeywordDays;
 
     protected override async Task OnInitializedAsync()
     {
@@ -215,6 +238,7 @@
             return;
         var userId = await UserIdAsync();
         _name = h.Name;
+        _newKeywordDays = h.NewKeywordDays > 0 ? h.NewKeywordDays : null;
         _members = await Households.MembersAsync(userId, h.Id, PageToken);
         _invites = h.IsOwner ? await Households.InvitesAsync(userId, h.Id, PageToken) : [];
         _ai = h.IsOwner ? await Ai.GetSettingsAsync(userId, h.Id, PageToken) : null;
@@ -284,6 +308,16 @@
             await LoadAsync();
         }))
             Ui.Toast.Success(_provider == AiProvider.None ? "AI naming is off." : "Saved. New photos are named from now on, and items that couldn't be named are tried again.");
+    }
+
+    private async Task SaveNewKeywordDaysAsync()
+    {
+        if (await RunAsync(async () =>
+        {
+            await Households.SetNewKeywordDaysAsync(await UserIdAsync(), Household!.Id, _newKeywordDays ?? 0, PageToken);
+            await Ui.RefreshAsync();
+        }))
+            Ui.Toast.Success(_newKeywordDays is null ? "Saved. \"new\" now stays until it's removed by hand." : "Saved.");
     }
 
     private async Task DeleteAsync()

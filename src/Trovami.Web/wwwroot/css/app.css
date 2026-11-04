@@ -83,7 +83,6 @@
     --r-lg: 10px;
 
     --side-w: 252px;
-    --page-max: 1320px;
     --gutter: clamp(16px, 3vw, 40px);
     --topbar-h: 0px;
     --tabbar-h: 0px;
@@ -254,8 +253,6 @@ td.num, th.num, .num.right { text-align: right; }
 .main {
     min-width: 0;
     width: 100%;
-    max-width: calc(var(--page-max) + 2 * var(--gutter));
-    margin: 0 auto;
     padding: 28px var(--gutter) calc(64px + var(--tabbar-h));
 }
 
@@ -686,6 +683,9 @@ td.num, th.num, .num.right { text-align: right; }
 
 /* ---------- Dialogs ---------- */
 
+/* A secret that isn't a sign-in password: looks like one, but password managers leave it alone. */
+.input-secret { -webkit-text-security: disc; }
+
 .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -835,7 +835,7 @@ td.num, th.num, .num.right { text-align: right; }
 .hh-label { grid-column: 1; color: var(--pencil); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.08em; }
 .hh-name { grid-column: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hh-button .icon { grid-column: 2; grid-row: 1 / 3; color: var(--pencil); }
-.hh-menu { left: 0; right: auto; width: 100%; }
+.hh-menu { left: 0; right: auto; width: 100%; min-width: 220px; }
 
 .side-count {
     margin-left: auto;
@@ -1009,7 +1009,7 @@ td.num, th.num, .num.right { text-align: right; }
 .swatch-none { display: grid; place-items: center; background: var(--sheet-2); color: var(--pencil); }
 
 /* The Locations page: the tree on the left stays put while the picked location scrolls. */
-.loc-split { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 32px; align-items: start; }
+.loc-split { display: grid; grid-template-columns: clamp(300px, 26vw, 520px) minmax(0, 1fr); gap: 32px; align-items: start; }
 .loc-nav {
     position: sticky;
     top: 16px;
@@ -1160,6 +1160,31 @@ td.num, th.num, .num.right { text-align: right; }
     background: var(--sheet-2);
     cursor: text;
 }
+/* A popover, placed next to its field by trovami.placeKeywordList. */
+.keyword-suggest {
+    position: fixed;
+    inset: auto;
+    max-height: 280px;
+    margin: 0;
+    padding: 4px;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--r-md);
+    background: var(--sheet);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+}
+.keyword-suggest li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--r-sm); cursor: pointer; }
+.keyword-suggest li:hover, .keyword-suggest li.on { background: var(--accent-soft); }
+.keyword-suggest-word { min-width: 0; overflow-wrap: anywhere; }
+.keyword-suggest .tree-count { margin-left: auto; }
+.tree-name.keyword-name { flex: 0 1 auto; }
+.keyword-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--loc); box-shadow: inset 0 0 0 1px var(--rule-strong); }
+.keyword-pin { display: inline-flex; flex: none; color: var(--pencil); }
+.keyword-colored { background: color-mix(in srgb, var(--loc) 28%, var(--sheet-3)); box-shadow: inset 0 0 0 1px var(--loc); }
+.keyword-cell { display: flex; flex-wrap: wrap; gap: 4px; }
+.keyword-color { margin-bottom: 16px; }
+.side-nav a.side-keyword-colored .icon { color: var(--loc); }
 .keywords:hover { border-color: var(--pencil); }
 .keywords:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .keyword {
@@ -1315,7 +1340,8 @@ body:has(.print-page) { background: #fff; }
 
 @media (max-width: 1100px) {
     :root { --side-w: 68px; }
-    .sidebar { padding: 14px 8px; align-items: center; }
+    /* Not a scroll box here: the household and user menus reach out past this narrow bar. */
+    .sidebar { z-index: 20; overflow: visible; padding: 14px 8px; align-items: center; }
     .brand { padding: 4px 0 16px; }
     .brand-name, .side-nav a span, .side-label, .usermenu-name, .usermenu-caret, .hh-label { display: none; }
     .hh-switch { width: 100%; }
@@ -1355,6 +1381,12 @@ body:has(.print-page) { background: #fff; }
     .topbar .brand { padding: 0; font-size: var(--t-md); }
     .topbar .brand-name { display: inline; }
     .topbar .usermenu-button { width: auto; }
+    /* The household between the logo and the user menu: its name only, shortened when long. */
+    .topbar { gap: 10px; }
+    .topbar .hh-switch { flex: 0 1 auto; min-width: 0; margin: 0 auto 0 0; }
+    .topbar .hh-button { display: flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 8px; }
+    .topbar .hh-label { display: none; }
+    .topbar .hh-name { min-width: 0; font-size: var(--t-sm); }
     .tabbar {
         position: fixed;
         left: 0;
@@ -1362,7 +1394,7 @@ body:has(.print-page) { background: #fff; }
         bottom: 0;
         z-index: 30;
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
         padding-bottom: env(safe-area-inset-bottom, 0px);
         background: var(--sheet);
@@ -1440,6 +1472,25 @@ body:has(.print-page) { background: #fff; }
     .field-row { flex-wrap: wrap; }
     .field-row > .field { flex: 1 1 140px; }
     .link-copy { flex-direction: column; }
+}
+
+@media (max-width: 700px) {
+    .keyword-suggest { max-height: 152px; }
+
+    /* What's left beside the keyboard; Cancel and Save stay in sight while the fields scroll. */
+    .modal-backdrop { height: var(--viewport-h, 100dvh); bottom: auto; }
+    .modal { max-height: calc(var(--viewport-h, 100dvh) - 32px); }
+    .modal:has(.modal-actions) { padding-bottom: 0; }
+    .modal-actions {
+        position: sticky;
+        bottom: 0;
+        z-index: 1;
+        margin: 8px -18px 0;
+        padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+        background: var(--sheet);
+        border-top: 1px solid var(--rule);
+    }
+    .modal-actions .btn { padding-inline: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

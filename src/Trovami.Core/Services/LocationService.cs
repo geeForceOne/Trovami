@@ -72,6 +72,15 @@ public sealed class LocationService(IDbContextFactory<AppDbContext> dbFactory, P
         await db.SaveChangesAsync(ct);
     }
 
+    // Only the keywords, for the editor that saves them as they change.
+    public async Task SetKeywordsAsync(string userId, Guid id, IReadOnlyList<string> keywords, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var location = await LoadAsync(db, userId, id, ct);
+        location.Keywords = ItemKeywords.Merge(null, keywords);
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task RenameAsync(string userId, Guid id, string name, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);

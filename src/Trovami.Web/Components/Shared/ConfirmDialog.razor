@@ -10,7 +10,7 @@
             {
                 <label class="field">
                     <span>@($"Type {_typed} to confirm")</span>
-                    <input class="input" @bind="_typedValue" @bind:event="oninput" autocomplete="off" spellcheck="false" @ref="_input" />
+                    <input data-bwignore="true" class="input" @bind="_typedValue" @bind:event="oninput" autocomplete="off" spellcheck="false" @ref="_input" />
                 </label>
             }
             <div class="modal-actions">

@@ -13,6 +13,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
     public DbSet<HouseholdInvite> HouseholdInvites => Set<HouseholdInvite>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<Item> Items => Set<Item>();
+    public DbSet<KeywordSetting> KeywordSettings => Set<KeywordSetting>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<PairingCode> PairingCodes => Set<PairingCode>();
@@ -175,6 +176,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         b.Entity<SyncCounter>(e => e.Property(x => x.Id).ValueGeneratedNever());
 
         b.Entity<SiteSettings>(e => e.Property(x => x.Id).ValueGeneratedNever());
+
+        b.Entity<Household>().Property(x => x.NewKeywordDays).HasDefaultValue(Household.DefaultNewKeywordDays);
+
+        b.Entity<KeywordSetting>(e =>
+        {
+            e.HasKey(x => new { x.HouseholdId, x.Word });
+            e.HasOne<Household>().WithMany().HasForeignKey(x => x.HouseholdId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.Word).HasMaxLength(Item.MaxKeywordLength);
+            e.Property(x => x.Color).HasMaxLength(16);
+        });
 
         b.Entity<AccountRequest>(e =>
         {

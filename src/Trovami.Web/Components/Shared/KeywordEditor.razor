@@ -1,30 +1,166 @@
+@inherits AppPage
+@inject ItemService Items
+@inject IJSRuntime JS
+
 @* Keywords as removable chips in a box that looks like an input, with the typing field last. A comma
-   ends a keyword; what's still being typed stays in Typed, for the form's Save to take. *@
-<div class="keywords">
-    @foreach (var k in Keywords)
+   or Enter ends a keyword, and it and the x save at once through Save, without the rest of the form.
+   What's still being typed stays in Typed, for the form's Save to take. While the field has focus, a
+   list offers the household's keywords that match, most used first: click one, or pick it with the
+   arrow keys and Enter. Enter without picking takes what was typed, so typing stays as fast. *@
+<div class="keyword-field" @onfocusout="() => _open = false">
+    <div class="keywords">
+        @foreach (var k in Keywords)
+        {
+            <span class="keyword @(Ui.KeywordColors.ContainsKey(k) ? "keyword-colored" : "")" style="@Format.ColorVar(Ui.KeywordColors.GetValueOrDefault(k))" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k}")" @onclick="() => RemoveAsync(k)"><Icon Name="x" Size="14" /></button></span>
+        }
+        @* No maxlength: typed fast or pasted, several keywords sit in the box before the commas split them. *@
+        @* The form attribute names no form, so that Enter here doesn't submit the one around it. *@
+        @* While the list is open, Escape closes only the list, not a dialog around it. *@
+        <input data-bwignore="true" id="@InputId" form="keyword-no-form" autocomplete="off" role="combobox" aria-autocomplete="list"
+               aria-expanded="@(ListOpen ? "true" : "false")" aria-controls="@ListId" aria-activedescendant="@(ListOpen && _highlight >= 0 ? $"{ListId}-{_highlight}" : null)"
+               @bind:get="Typed" @bind:set="TypeAsync" @bind:event="oninput" @onkeydown="OnKeyDownAsync" @onkeydown:stopPropagation="ListOpen" @onfocus="OpenAsync"
+               placeholder="@(Keywords.Count == 0 ? Placeholder : "Add")" />
+    </div>
+    @if (ListOpen)
     {
-        <span class="keyword" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k}")" @onclick="() => RemoveAsync(k)"><Icon Name="x" Size="14" /></button></span>
+        var matches = Matches();
+        @* Keeps the focus in the field when clicking the list, so it doesn't close first. *@
+        <ul class="keyword-suggest" id="@ListId" popover="manual" role="listbox" aria-label="Existing keywords" @onmousedown:preventDefault="true">
+            @foreach (var (k, i) in matches.Select((k, i) => (k, i)))
+            {
+                <li id="@($"{ListId}-{i}")" role="option" aria-selected="@(i == _highlight ? "true" : "false")" class="@(i == _highlight ? "on" : "")" @key="k.Keyword" @onclick="() => PickAsync(k.Keyword)">
+                    <span class="keyword-suggest-word">@k.Keyword</span>
+                    @if (Ui.KeywordColors.GetValueOrDefault(k.Keyword) is { } color)
+                    {
+                        <span class="keyword-dot" style="@Format.ColorVar(color)"></span>
+                    }
+                    @if (k.Items > 0)
+                    {
+                        <span class="tree-count">@Format.Number(k.Items)</span>
+                    }
+                </li>
+            }
+        </ul>
     }
-    @* No maxlength: typed fast or pasted, several keywords sit in the box before the commas split them. *@
-    <input id="@InputId" @bind:get="Typed" @bind:set="TypeAsync" @bind:event="oninput"
-           placeholder="@(Keywords.Count == 0 ? Placeholder : "Add")" />
 </div>
 
 @code {
+    private const int MaxSuggestions = 8;
+
     [Parameter, EditorRequired] public List<string> Keywords { get; set; } = [];
-    [Parameter] public EventCallback<List<string>> KeywordsChanged { get; set; }
+    [Parameter, EditorRequired] public Func<List<string>, Task> Save { get; set; } = default!;
     [Parameter] public string Typed { get; set; } = "";
     [Parameter] public EventCallback<string> TypedChanged { get; set; }
     [Parameter] public string InputId { get; set; } = "keyword-input";
     [Parameter] public string Placeholder { get; set; } = "Add a keyword";
 
+    // The household the keywords belong to; the one being shown when not given.
+    [Parameter] public Guid? HouseholdId { get; set; }
+
+    private List<string>? _unsaved;
+    private bool _saving;
+    private IReadOnlyList<KeywordCount> _known = [];
+    private bool _open;
+    private int _highlight = -1;
+
+    private string ListId => $"{InputId}-list";
+    private bool ListOpen => _open && Matches().Count > 0;
+
+    // What fits what's being typed and isn't on it yet: those starting with it first, then the most used.
+    private List<KeywordCount> Matches()
+    {
+        var typed = Search.Normalize(Typed.Trim());
+        return _known
+            .Where(k => !Keywords.Contains(k.Keyword) && Search.Normalize(k.Keyword).Contains(typed))
+            .OrderBy(k => Search.Normalize(k.Keyword).StartsWith(typed) ? 0 : 1)
+            .ThenByDescending(k => k.Items)
+            .ThenBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase)
+            .Take(MaxSuggestions).ToList();
+    }
+
+    // Read each time, as keywords change on other pages and devices.
+    private async Task OpenAsync()
+    {
+        _open = true;
+        _highlight = -1;
+        if ((HouseholdId ?? Ui.Household?.Id) is { } household)
+            await TryAsync(async () => _known = await Items.KeywordSuggestionsAsync(await UserIdAsync(), household, PageToken));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!ListOpen) return;
+        try
+        {
+            await JS.InvokeVoidAsync("trovami.placeKeywordList", ListId, InputId);
+        }
+        catch (JSException)
+        {
+        }
+    }
+
     private async Task TypeAsync(string value)
     {
         var parts = value.Split(',');
-        if (parts.Length > 1)
-            await KeywordsChanged.InvokeAsync(ItemKeywords.Clean(Keywords.Concat(parts[..^1])).ToList());
+        _open = true;
+        _highlight = -1;
         await TypedChanged.InvokeAsync(parts[^1]);
+        if (parts.Length > 1)
+            await SaveAsync(ItemKeywords.Clean(Keywords.Concat(parts[..^1])).ToList());
     }
 
-    private Task RemoveAsync(string word) => KeywordsChanged.InvokeAsync(Keywords.Where(k => k != word).ToList());
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        var matches = Matches();
+        switch (e.Key)
+        {
+            case "ArrowDown" when matches.Count > 0:
+                _open = true;
+                _highlight = _highlight + 1 >= matches.Count ? 0 : _highlight + 1;
+                break;
+            case "ArrowUp" when matches.Count > 0:
+                _open = true;
+                _highlight = _highlight <= 0 ? matches.Count - 1 : _highlight - 1;
+                break;
+            case "Escape":
+                _open = false;
+                break;
+            case "Enter" when ListOpen && _highlight >= 0 && _highlight < matches.Count:
+                await PickAsync(matches[_highlight].Keyword);
+                break;
+            case "Enter" when !string.IsNullOrWhiteSpace(Typed):
+                await PickAsync(Typed);
+                break;
+        }
+    }
+
+    private async Task PickAsync(string word)
+    {
+        _highlight = -1;
+        await TypedChanged.InvokeAsync("");
+        await SaveAsync(ItemKeywords.Clean(Keywords.Append(word)).ToList());
+    }
+
+    private Task RemoveAsync(string word) => SaveAsync(Keywords.Where(k => k != word).ToList());
+
+    // One save at a time, always of the latest list, so that quick changes can't land out of order.
+    private async Task SaveAsync(List<string> keywords)
+    {
+        Keywords = keywords;
+        _unsaved = keywords;
+        if (_saving) return;
+        _saving = true;
+        try
+        {
+            while (_unsaved is { } next)
+            {
+                _unsaved = null;
+                await Save(next);
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
 }

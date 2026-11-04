@@ -34,11 +34,11 @@ else
                     <div class="field-row field-row-wrap">
                         <label class="field field-grow">
                             <span>Server</span>
-                            <input class="input" @bind="_host" placeholder="smtp-relay.brevo.com" spellcheck="false" autocomplete="off" />
+                            <input data-bwignore="true" class="input" @bind="_host" placeholder="smtp-relay.brevo.com" spellcheck="false" autocomplete="off" />
                         </label>
                         <label class="field">
                             <span>Port</span>
-                            <input class="input input-short" type="number" min="1" max="65535" @bind="_port" />
+                            <input data-bwignore="true" class="input input-short" type="number" min="1" max="65535" @bind="_port" />
                         </label>
                         <label class="field">
                             <span>Encryption</span>
@@ -53,11 +53,11 @@ else
                     <div class="field-row field-row-wrap">
                         <label class="field field-grow">
                             <span>Username</span>
-                            <input class="input" @bind="_userName" spellcheck="false" autocomplete="off" />
+                            <input data-bwignore="true" class="input" @bind="_userName" spellcheck="false" autocomplete="off" />
                         </label>
                         <label class="field field-grow">
                             <span>Password</span>
-                            <input class="input" type="password" @bind="_password" autocomplete="new-password"
+                            <input data-bwignore="true" class="input-secret input" type="text" @bind="_password" autocomplete="off"
                                    placeholder="@(_view.Password == SecretStatus.Set ? "Saved; leave empty to keep it" : "")" />
                             @if (_view.Password == SecretStatus.Unreadable)
                             {
@@ -72,16 +72,16 @@ else
                     <div class="field-row field-row-wrap">
                         <label class="field field-grow">
                             <span>Sender address</span>
-                            <input class="input" type="email" @bind="_from" placeholder="trovami@example.com" spellcheck="false" />
+                            <input data-bwignore="true" class="input" type="text" inputmode="email" @bind="_from" placeholder="trovami@example.com" spellcheck="false" />
                         </label>
                         <label class="field field-grow">
                             <span>Sender name</span>
-                            <input class="input" @bind="_fromName" placeholder="@EmailSettingsService.DefaultFromName" />
+                            <input data-bwignore="true" class="input" @bind="_fromName" placeholder="@EmailSettingsService.DefaultFromName" />
                         </label>
                     </div>
                     <label class="field">
                         <span>The app's address <span class="muted">(optional)</span></span>
-                        <input class="input" type="url" @bind="_publicUrl" placeholder="https://trovami.example.com" spellcheck="false" />
+                        <input data-bwignore="true" class="input" type="url" @bind="_publicUrl" placeholder="https://trovami.example.com" spellcheck="false" />
                         <span class="field-hint">Used for links in emails. Without it, links use the address you're using right now, which is wrong behind some reverse proxies.</span>
                     </label>
                     @foreach (var e in _errors)

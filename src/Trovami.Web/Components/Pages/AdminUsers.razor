@@ -53,7 +53,7 @@
         <strong>@_link.Title</strong>
         <div>@_link.Reason Copy the link and send it to them yourself. @_link.Validity</div>
         <div class="link-copy">
-            <input class="input" readonly value="@_link.Url" aria-label="Link" onfocus="this.select()" />
+            <input data-bwignore="true" class="input" readonly value="@_link.Url" aria-label="Link" onfocus="this.select()" />
             <button type="button" class="btn btn-primary btn-sm" @onclick="CopyLinkAsync"><Icon Name="copy" Size="15" /> Copy link</button>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _link = null">Done</button>

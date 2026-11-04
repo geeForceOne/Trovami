@@ -363,6 +363,11 @@ namespace Trovami.Core.Data.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("NewKeywordDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(30);
+
                     b.Property<string>("OwnerId")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -499,6 +504,27 @@ namespace Trovami.Core.Data.Migrations
                     b.HasIndex("HouseholdId", "LocationId");
 
                     b.ToTable("Items");
+                });
+
+            modelBuilder.Entity("Trovami.Core.Models.KeywordSetting", b =>
+                {
+                    b.Property<Guid>("HouseholdId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Word")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Pinned")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("HouseholdId", "Word");
+
+                    b.ToTable("KeywordSettings");
                 });
 
             modelBuilder.Entity("Trovami.Core.Models.Location", b =>
@@ -854,6 +880,15 @@ namespace Trovami.Core.Data.Migrations
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Trovami.Core.Models.KeywordSetting", b =>
+                {
+                    b.HasOne("Trovami.Core.Models.Household", null)
+                        .WithMany()
+                        .HasForeignKey("HouseholdId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Trovami.Core.Models.Location", b =>

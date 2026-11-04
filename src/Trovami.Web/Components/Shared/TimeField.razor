@@ -1,7 +1,7 @@
 
 @* A time of day in the person's region format (03:00, or 3:00 AM), as a text field: the
    browser's own time field follows the browser's language instead. *@
-<input class="input input-short time-field @(_invalid ? "invalid" : "")" value="@_text" @oninput="OnInput" @onblur="OnBlur"
+<input data-bwignore="true" class="input input-short time-field @(_invalid ? "invalid" : "")" value="@_text" @oninput="OnInput" @onblur="OnBlur"
        aria-label="@Label" aria-invalid="@(_invalid ? "true" : null)" disabled="@Disabled" autocomplete="off" spellcheck="false" />
 
 @code {

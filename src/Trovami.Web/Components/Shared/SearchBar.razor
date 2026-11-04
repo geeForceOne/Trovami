@@ -6,7 +6,7 @@
 {
     <form class="searchbar" role="search" @onsubmit="Go" @onsubmit:preventDefault="true">
         <Icon Name="search" Size="18" />
-        <input class="searchbar-input" type="search" placeholder="Find something: drill, passport, blue box…" aria-label="Search"
+        <input data-bwignore="true" class="searchbar-input" type="search" placeholder="Find something: drill, passport, blue box…" aria-label="Search"
                @bind="_query" @bind:event="oninput" enterkeyhint="search" autocomplete="off" spellcheck="false" />
         @if (!string.IsNullOrEmpty(_query))
         {

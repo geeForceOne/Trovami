@@ -1,25 +1,34 @@
 @inherits AppPage
 @inject ItemService Items
 
-@* The right pane of the Locations page for a keyword: the items that have it, from anywhere, and
-   ways to tidy it up across all of them. Changes tell the page through OnChanged, which reloads
-   the keyword list. *@
+@* The right pane of the Locations page for a keyword: the items that have it, from anywhere, with all
+   their keywords to take off right there, its color and pin, and ways to tidy it up across all of them.
+   Changes reload the layout's and the page's keywords through Ui.RefreshAsync. *@
 <a class="loc-back" href="k"><Icon Name="left" Size="16" /> All keywords</a>
 
-<div class="loc-head">
-    <span class="loc-icon loc-icon-lg"><Icon Name="tag" Size="28" /></span>
+<div class="loc-head" style="@Format.ColorVar(Current?.Color)">
+    <span class="loc-icon loc-icon-lg @(Current?.Color is null ? "" : "colored")"><Icon Name="tag" Size="28" /></span>
     <div class="loc-title">
         <h1>@Keyword</h1>
         <p class="page-sub">Keyword · @Format.Count(_items.Count, "item", "items")</p>
     </div>
-    @if (_items.Count > 0)
-    {
-        <div class="page-actions">
-            <button type="button" class="btn btn-secondary btn-sm" disabled="@Busy" @onclick="RenameAsync"><Icon Name="edit" Size="16" /> Rename</button>
+    <div class="page-actions">
+        <button type="button" class="btn btn-secondary btn-sm" disabled="@Busy" aria-pressed="@(Pinned ? "true" : "false")" title="Pinned keywords show in the menu, also without items" @onclick="TogglePinAsync"><Icon Name="pin" Size="16" /> @(Pinned ? "Unpin" : "Pin")</button>
+        @if (_items.Count > 0 || Pinned)
+        {
+            <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="RenameAsync"><Icon Name="edit" Size="16" /> Rename</button>
+        }
+        @if (_items.Count > 0)
+        {
             <button type="button" class="btn btn-ghost btn-sm" aria-expanded="@(_merging ? "true" : "false")" @onclick="() => _merging = !_merging"><Icon Name="move" Size="16" /> Merge into…</button>
             <button type="button" class="btn btn-ghost btn-sm btn-danger-text" disabled="@Busy" @onclick="RemoveAsync"><Icon Name="trash" Size="16" /> Remove</button>
-        </div>
-    }
+        }
+    </div>
+</div>
+
+<div class="field keyword-color">
+    <span>Color</span>
+    <ColorPicker Value="@Current?.Color" ValueChanged="SetColorAsync" Disabled="Busy" />
 </div>
 
 @if (_merging)
@@ -51,24 +60,26 @@ else if (_items.Count == 0)
 {
     <div class="empty">
         <Icon Name="tag" Size="32" />
-        <p>No item has this keyword anymore.</p>
+        <p>@(Pinned ? "No item has this keyword right now. It stays here because it's pinned." : "No item has this keyword anymore.")</p>
     </div>
 }
 else
 {
-    <ItemTable Items="_items" Tree="Tree" LocationId="null" />
+    <ItemTable Items="_items" Tree="Tree" LocationId="null" RemoveKeyword="RemoveFromItemAsync" />
 }
 
 @code {
     [Parameter, EditorRequired] public string Keyword { get; set; } = "";
     [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
     [Parameter, EditorRequired] public IReadOnlyList<KeywordCount> Keywords { get; set; } = [];
-    [Parameter] public EventCallback OnChanged { get; set; }
 
     private IReadOnlyList<ItemView> _items = [];
     private bool _loaded;
     private bool _merging;
     private string? _shown;
+
+    private KeywordCount? Current => Keywords.FirstOrDefault(k => k.Keyword == Keyword);
+    private bool Pinned => Current?.Pinned == true;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -87,6 +98,32 @@ else
         _loaded = true;
     }
 
+    private async Task SetColorAsync(string? color)
+    {
+        if (Household is null) return;
+        if (await RunAsync(async () => await Items.SetKeywordColorAsync(await UserIdAsync(), Household.Id, Keyword, color, PageToken)))
+            await Ui.RefreshAsync();
+    }
+
+    private async Task TogglePinAsync()
+    {
+        if (Household is null) return;
+        var pinned = !Pinned;
+        if (await RunAsync(async () => await Items.SetKeywordPinnedAsync(await UserIdAsync(), Household.Id, Keyword, pinned, PageToken)))
+            await Ui.RefreshAsync();
+    }
+
+    // The x on a keyword in the table: takes it off that one item.
+    private async Task RemoveFromItemAsync(ItemView item, string word)
+    {
+        if (await TryAsync(async () => await Items.SetKeywordsAsync(await UserIdAsync(), item.Id, item.Keywords.Where(k => k != word).ToList(), PageToken)))
+        {
+            await LoadAsync();
+            await Ui.RefreshAsync();
+        }
+        StateHasChanged();
+    }
+
     // Renaming to a keyword that exists merges the two, the same as "Merge into…".
     private async Task RenameAsync()
     {
@@ -101,7 +138,8 @@ else
 
     private async Task RemoveAsync()
     {
-        if (!await Ui.Confirm.AskAsync($"Remove \"{Keyword}\"?", $"It's taken off {Format.Count(_items.Count, "item", "items")} and off locations that add it. The items stay.", "Remove", danger: true))
+        var pinned = Pinned ? " It stays pinned, until you unpin it." : "";
+        if (!await Ui.Confirm.AskAsync($"Remove \"{Keyword}\"?", $"It's taken off {Format.Count(_items.Count, "item", "items")} and off locations that add it. The items stay.{pinned}", "Remove", danger: true))
             return;
         await ReplaceAsync(null, $"Removed \"{Keyword}\".");
     }
@@ -109,11 +147,13 @@ else
     private async Task ReplaceAsync(string? newKeyword, string done)
     {
         if (Household is null) return;
+        var stays = newKeyword is null && Pinned;
         if (await RunAsync(async () => await Items.ReplaceKeywordAsync(await UserIdAsync(), Household.Id, Keyword, newKeyword, PageToken)))
         {
             Ui.Toast.Success(done);
-            await OnChanged.InvokeAsync();
-            Nav.NavigateTo(newKeyword is null ? "" : KeywordLink(newKeyword));
+            await Ui.RefreshAsync();
+            if (!stays)
+                Nav.NavigateTo(newKeyword is null ? "" : KeywordLink(newKeyword));
         }
     }
 

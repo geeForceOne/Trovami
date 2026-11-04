@@ -24,7 +24,7 @@ else if (Household is null)
         <h1>@($"Welcome to {AppInfo.Name}")</h1>
         <p class="page-sub">Everything you store belongs to a household: your home, a cellar, a holiday flat. Start with one; you can invite others into it later.</p>
         <form class="inline-add" @onsubmit="CreateHouseholdAsync" @onsubmit:preventDefault="true">
-            <input class="input input-lg" @bind="_householdName" @bind:event="oninput" placeholder="Name, e.g. Home" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
+            <input data-bwignore="true" class="input input-lg" @bind="_householdName" @bind:event="oninput" placeholder="Name, e.g. Home" maxlength="@Trovami.Core.Models.Household.MaxNameLength" aria-label="Household name" />
             <button type="submit" class="btn btn-primary btn-lg" disabled="@(Busy || string.IsNullOrWhiteSpace(_householdName))">Create household</button>
         </form>
         @if (Ui.Invites.Count > 0)
@@ -73,7 +73,15 @@ else
                             <li>
                                 <div class="tree-row @(selected ? "on" : "")">
                                     <a class="tree-link" href="@KeywordDetail.KeywordLink(k.Keyword)" aria-current="@(selected ? "page" : null)">
-                                        <span class="tree-name">@k.Keyword</span>
+                                        <span class="tree-name keyword-name">@k.Keyword</span>
+                                        @if (k.Color is not null)
+                                        {
+                                            <span class="keyword-dot" style="@Format.ColorVar(k.Color)"></span>
+                                        }
+                                        @if (k.Pinned)
+                                        {
+                                            <span class="keyword-pin" title="Pinned"><Icon Name="pin" Size="12" /></span>
+                                        }
                                     </a>
                                     <span class="tree-count">@Format.Number(k.Items)</span>
                                 </div>
@@ -92,7 +100,7 @@ else
             }
             else if (Word is not null)
             {
-                <KeywordDetail Keyword="@Word" Tree="_tree" Keywords="_keywords" OnChanged="ReloadAsync" />
+                <KeywordDetail Keyword="@Word" Tree="_tree" Keywords="_keywords" />
             }
             else if (Id is { } id)
             {
@@ -132,7 +140,7 @@ else
     </div>
 }
 
-<NewLocationDialog @ref="_newDialog" />
+<LocationDialog @ref="_newDialog" />
 
 @code {
     // The picked location's short code; an old /l/<guid> link is taken there too.
@@ -146,11 +154,12 @@ else
 
     private bool AllKeywords => Word is null && Key is null && Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/') == "k";
 
-    // The most used, A to Z, plus the picked one when it isn't among them.
+    // The most used, A to Z, plus the pinned ones (phones have no side menu to show them in) and the
+    // picked one when they aren't among them.
     private IEnumerable<KeywordCount> TopKeywords() => _keywords
         .OrderByDescending(k => k.Items).ThenBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase)
         .Take(TopKeywordCount)
-        .Concat(_keywords.Where(k => k.Keyword == Word))
+        .Concat(_keywords.Where(k => k.Pinned || k.Keyword == Word))
         .DistinctBy(k => k.Keyword)
         .OrderBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase);
 
@@ -165,7 +174,7 @@ else
     private readonly HashSet<Guid> _expanded = [];
     private IReadOnlyList<KeywordCount> _keywords = [];
     private bool _keywordsOpen = true;
-    private NewLocationDialog _newDialog = default!;
+    private LocationDialog _newDialog = default!;
 
     protected override async Task OnInitializedAsync()
     {
@@ -271,7 +280,7 @@ else
             Nav.NavigateTo($"l/{node.ShortCode}");
     }
 
-    private async Task<Guid?> CreateAsync(NewLocationDialog.NewLocation loc)
+    private async Task<Guid?> CreateAsync(LocationDialog.Fields loc)
     {
         Guid? id = null;
         await RunAsync(async () =>
@@ -279,11 +288,18 @@ else
             var userId = await UserIdAsync();
             var newId = await Locations.CreateAsync(userId, Household!.Id, loc.ParentId, loc.Name, loc.Kind, ct: PageToken);
             id = newId;
-            if (loc.Label is not null || loc.Color is not null)
-                await Locations.UpdateAsync(userId, newId, new LocationUpdate(loc.Name, loc.Kind, null, loc.Color, loc.Label, []), PageToken);
+            if (loc.Label is not null || loc.Color is not null || loc.Notes is not null || loc.Keywords.Count > 0)
+                await Locations.UpdateAsync(userId, newId, new LocationUpdate(loc.Name, loc.Kind, loc.Notes, loc.Color, loc.Label, loc.Keywords), PageToken);
         });
-        if (id is not null)
+        if (id is { } created)
         {
+            // Its own step: a photo that can't be read shows an error, and the location is still there.
+            if (loc.Photo is { } photo)
+                await RunAsync(async () =>
+                {
+                    await using var stream = photo.OpenReadStream(Trovami.Core.Photos.PhotoStore.MaxUploadBytes, PageToken);
+                    await Locations.SetPhotoAsync(await UserIdAsync(), created, stream, PageToken);
+                });
             await ReloadAsync();
             if (loc.ParentId is { } p)
                 _expanded.Add(p);
