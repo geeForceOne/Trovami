@@ -1,3 +1,4 @@
+using Trovami.Core.Models;
 using Trovami.Core.Services;
 using Trovami.Web.Components.Shared;
 
@@ -34,6 +35,9 @@ public sealed class AppUi
 
     // The last page before an item page, base-relative, for the item's Close; null after a direct link.
     public string? BeforeItem { get; internal set; }
+
+    // The kind of the last location added, the next one's default, until the page reloads.
+    public LocationKind? LastLocationKind { get; set; }
 
     // Raised after the household changed (switched, renamed, created) or the Inbox count did;
     // pages that show household data reload.

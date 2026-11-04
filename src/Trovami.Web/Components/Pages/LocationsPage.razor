@@ -6,11 +6,14 @@
 @inject HouseholdService Households
 @inject LocationService Locations
 @inject ItemService Items
+@inject IJSRuntime JS
 
 @* The location tree on the left and the picked location on the right. Both routes use this one
    page, so the tree keeps what's open while moving between locations. Under the tree, the most
    used keywords (all of them at /k): a picked one shows its items on the right. On phones it's
-   one column: the tree, or the picked location or keyword with a way back. *@
+   one column: the tree, or the picked location or keyword with a way back. Coming to the page without
+   a location opens the last one picked, per browser and household; the links inside the page still
+   lead back to the overview. *@
 <PageTitle>@(Word is not null ? Word : AllKeywords ? "Keywords" : Id is not null && _tree.Find(Id) is { } shown ? shown.Name : "Inventory") · @AppInfo.Name</PageTitle>
 
 @if (!_loaded)
@@ -175,6 +178,8 @@ else
     private IReadOnlyList<KeywordCount> _keywords = [];
     private bool _keywordsOpen = true;
     private LocationDialog _newDialog = default!;
+    private const string LastLocationPref = "lastLocation.";
+    private Guid? _rememberedId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -183,13 +188,32 @@ else
             await ReloadAsync();
             // Switched to another household: the picked location isn't in it.
             if (Id is { } id && !_tree.Contains(id))
-                Nav.NavigateTo("");
+                Nav.NavigateTo(await LastLocationLinkAsync() ?? "");
         });
         await ReloadAsync();
         // The first two levels open, so the rooms show right away.
         foreach (var top in _tree.ChildrenOf(null))
             _expanded.Add(top.Id);
+        if (Key is null && Word is null && !AllKeywords && await LastLocationLinkAsync() is { } last)
+            Nav.NavigateTo(last, replace: true);
         _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Household is { } h && _tree.Find(Id) is { } node && node.Id != _rememberedId)
+        {
+            _rememberedId = node.Id;
+            await JS.InvokeVoidAsync("trovami.setPref", LastLocationPref + h.Id, node.ShortCode);
+        }
+    }
+
+    // Null when nothing was picked in this household yet, or that location is gone.
+    private async Task<string?> LastLocationLinkAsync()
+    {
+        if (Household is not { } h) return null;
+        var code = await JS.InvokeAsync<string?>("trovami.getPref", LastLocationPref + h.Id);
+        return code is not null && _tree.FindByCode(code) is { } node ? $"l/{node.ShortCode}" : null;
     }
 
     protected override void OnParametersSet()
@@ -270,14 +294,14 @@ else
                 _expanded.Add(n.Id);
     }
 
-    // New locations go inside the one that's picked; the dialog can change that.
+    // New locations go inside the one that's picked; the dialog can change that. The page stays where
+    // it is, with the way to the new location open in the tree.
     private async Task NewLocationAsync()
     {
         if (Household is null) return;
         var parent = Id is { } id && _tree.Contains(id) ? id : (Guid?)null;
-        var created = await _newDialog.AskAsync(() => _tree, parent, CreateAsync);
-        if (_tree.Find(created) is { } node)
-            Nav.NavigateTo($"l/{node.ShortCode}");
+        await _newDialog.AskAsync(() => _tree, parent, CreateAsync, Ui.LastLocationKind);
+        Ui.LastLocationKind = _newDialog.LastKind;
     }
 
     private async Task<Guid?> CreateAsync(LocationDialog.Fields loc)
@@ -302,7 +326,9 @@ else
                 });
             await ReloadAsync();
             if (loc.ParentId is { } p)
-                _expanded.Add(p);
+                foreach (var a in _tree.Ancestry(p))
+                    _expanded.Add(a.Id);
+            Ui.Toast.Success($"{loc.Name} added.");
             StateHasChanged();
         }
         return id;

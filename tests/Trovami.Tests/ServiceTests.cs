@@ -28,6 +28,31 @@ public class ServiceTests
     }
 
     [Fact]
+    public async Task NeighborsAreTheItemsDirectlyAtTheSameLocation()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var ben = await t.AddUserAsync("ben");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var room = await t.Locations.CreateAsync(anna, home, null, "Kitchen", LocationKind.Room);
+        var drawer = await t.Locations.CreateAsync(anna, home, room, "Drawer", LocationKind.Drawer);
+        var (cup, fork, spoon, knife, loose) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        await t.Items.CreateAsync(anna, home, new ItemCreate(spoon, room, "spoon", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(cup, room, "Cup", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(fork, room, "Fork", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(knife, drawer, "Knife", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(loose, null, "Loose", null));
+        async Task<string> Code(Guid id) => (await t.Items.GetAsync(anna, id)).ShortCode;
+
+        Assert.Equal(new ItemNeighbors(null, await Code(fork), 1, 3), await t.Items.NeighborsAsync(anna, cup));
+        Assert.Equal(new ItemNeighbors(await Code(cup), await Code(spoon), 2, 3), await t.Items.NeighborsAsync(anna, fork));
+        Assert.Equal(new ItemNeighbors(await Code(fork), null, 3, 3), await t.Items.NeighborsAsync(anna, spoon));
+        Assert.Equal(new ItemNeighbors(null, null, 1, 1), await t.Items.NeighborsAsync(anna, knife));
+        Assert.Equal(new ItemNeighbors(null, null, 1, 1), await t.Items.NeighborsAsync(anna, loose));
+        await Assert.ThrowsAsync<NotFoundException>(() => t.Items.NeighborsAsync(ben, cup));
+    }
+
+    [Fact]
     public async Task ALocationCantMoveIntoItself()
     {
         using var t = new TestDb();

@@ -119,6 +119,7 @@
     private IBrowserFile? _photo;
     private int _added;
     private Guid? _lastId;
+    private LocationKind? _lastKind;
     private Func<Fields, Task<Guid?>> _create = default!;
     private Func<LocationTree> _currentTree = default!;
     private ElementReference _nameInput;
@@ -126,12 +127,18 @@
 
     private bool CanSave => !_busy && !_picking && !string.IsNullOrWhiteSpace(_name);
 
+    // The kind to start the next new location with, once this dialog has closed.
+    public LocationKind? LastKind => _lastKind;
+
     // Resolves to the last location created, or null if none was. currentTree: the page's tree,
-    // read again after each save so a location just added can be the next parent.
-    public Task<Guid?> AskAsync(Func<LocationTree> currentTree, Guid? parentId, Func<Fields, Task<Guid?>> create)
+    // read again after each save so a location just added can be the next parent. lastKind: the kind
+    // used last, which goes before the one suggested by the parent, except in an empty household.
+    public Task<Guid?> AskAsync(Func<LocationTree> currentTree, Guid? parentId, Func<Fields, Task<Guid?>> create, LocationKind? lastKind = null)
     {
         var tree = currentTree();
-        var kind = parentId is null ? (tree.Count == 0 ? LocationKind.House : LocationKind.Room) : KindSelect.ChildKind(tree.Find(parentId)!.Kind);
+        _lastKind = lastKind;
+        var kind = tree.Count > 0 && lastKind is { } last ? last
+            : parentId is null ? (tree.Count == 0 ? LocationKind.House : LocationKind.Room) : KindSelect.ChildKind(tree.Find(parentId)!.Kind);
         return Open(null, null, currentTree, create, parentId, "", kind, null, null, null, [], false);
     }
 
@@ -186,7 +193,7 @@
         _parentId = id;
         _picking = false;
         if (_steps is null)
-            _kind = id is null ? LocationKind.Room : KindSelect.ChildKind(_tree.Find(id)!.Kind);
+            _kind = _lastKind ?? (id is null ? LocationKind.Room : KindSelect.ChildKind(_tree.Find(id)!.Kind));
         _focusPending = true;
     }
 
@@ -255,6 +262,9 @@
             return;
         _lastId = id;
         _added++;
+        // Not the household's first location: that's the house, and what goes inside it isn't one too.
+        if (_steps is null && _tree.Count > 0)
+            _lastKind = _kind;
         if (!another)
         {
             Close();

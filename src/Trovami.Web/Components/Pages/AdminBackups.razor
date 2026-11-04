@@ -43,11 +43,11 @@ else
                     <div class="field-row field-row-wrap">
                         <label class="field field-grow">
                             <span>Password <span class="muted">(optional)</span></span>
-                            <input data-bwignore="true" class="input-secret input" type="text" name="password" @bind="_password" @bind:event="oninput" autocomplete="off" />
+                            <input data-bwignore="true" data-1p-ignore data-lpignore="true" data-form-type="other" class="input" type="password" name="password" @bind="_password" @bind:event="oninput" autocomplete="new-password" />
                         </label>
                         <label class="field field-grow">
                             <span>Repeat password</span>
-                            <input data-bwignore="true" class="input-secret input" type="text" @bind="_password2" @bind:event="oninput" autocomplete="off" disabled="@string.IsNullOrEmpty(_password)" />
+                            <input data-bwignore="true" data-1p-ignore data-lpignore="true" data-form-type="other" class="input" type="password" @bind="_password2" @bind:event="oninput" autocomplete="new-password" disabled="@string.IsNullOrEmpty(_password)" />
                         </label>
                     </div>
                     @if (!string.IsNullOrEmpty(_password) && _password2.Length > 0 && _password != _password2)
@@ -156,7 +156,7 @@ else
                         </label>
                         <label class="field">
                             <span>Password <span class="muted">(for an encrypted backup)</span></span>
-                            <input data-bwignore="true" class="input-secret input" type="text" @bind="_restorePassword" autocomplete="off" />
+                            <input data-bwignore="true" data-1p-ignore data-lpignore="true" data-form-type="other" class="input" type="password" @bind="_restorePassword" autocomplete="new-password" />
                         </label>
                         <div class="actions">
                             <button type="button" class="btn btn-secondary" disabled="@(Busy || _upload is null)" @onclick="CheckUploadAsync">Check backup</button>

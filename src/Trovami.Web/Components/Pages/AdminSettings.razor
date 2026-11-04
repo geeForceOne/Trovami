@@ -57,7 +57,7 @@ else
                         </label>
                         <label class="field field-grow">
                             <span>Password</span>
-                            <input data-bwignore="true" class="input-secret input" type="text" @bind="_password" autocomplete="off"
+                            <input data-bwignore="true" data-1p-ignore data-lpignore="true" data-form-type="other" class="input" type="password" @bind="_password" autocomplete="new-password"
                                    placeholder="@(_view.Password == SecretStatus.Set ? "Saved; leave empty to keep it" : "")" />
                             @if (_view.Password == SecretStatus.Unreadable)
                             {
