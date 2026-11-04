@@ -12,11 +12,11 @@
                 <span>@_label</span>
                 @if (_multiline)
                 {
-                    <textarea class="textarea" rows="5" @bind="_value" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_input"></textarea>
+                    <textarea data-bwignore="true" class="textarea" rows="5" @bind="_value" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_input"></textarea>
                 }
                 else
                 {
-                    <input class="input" type="@_type" @bind="_value" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_input" autocomplete="off" />
+                    <input data-bwignore="true" class="input" type="@_type" @bind="_value" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_input" autocomplete="off" />
                 }
             </label>
             <div class="modal-actions">

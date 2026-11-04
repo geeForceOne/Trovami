@@ -4,7 +4,7 @@
    field shows the browser's language (10/14/2026) whatever the page says, so this is a text
    field; the calendar button opens the browser's picker, whose choice is shown in the region format. *@
 <span class="date-field @(_invalid ? "invalid" : "")">
-    <input class="input date-text" value="@_text" @oninput="OnInput" @onblur="OnBlur" placeholder="@Pattern"
+    <input data-bwignore="true" class="input date-text" value="@_text" @oninput="OnInput" @onblur="OnBlur" placeholder="@Pattern"
            aria-label="@Label" aria-invalid="@(_invalid ? "true" : null)" autocomplete="off" spellcheck="false" inputmode="numeric" />
     <button type="button" class="date-pick" title="Pick a date" aria-label="Pick a date" tabindex="-1" @onclick="OpenPickerAsync">
         <Icon Name="calendar" Size="16" />

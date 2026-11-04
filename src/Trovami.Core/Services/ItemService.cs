@@ -21,7 +21,7 @@ public sealed record ItemView(
 // What the phone (or the web app's add form) sends for a new item. Id is chosen by the client.
 public sealed record ItemCreate(Guid Id, Guid? LocationId, string? Name, string? Notes, int Quantity = 1, bool PhotoExpected = false);
 
-public sealed record KeywordCount(string Keyword, int Items);
+public sealed record KeywordCount(string Keyword, int Items, string? Color = null, bool Pinned = false);
 
 public sealed record SearchResult(IReadOnlyList<ItemView> Items, IReadOnlyList<LocationNode> Locations, LocationTree Tree);
 
@@ -109,7 +109,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         var locationId = create.LocationId is { } l && await db.Locations.AnyAsync(x => x.Id == l && x.HouseholdId == householdId, ct)
             ? l : (Guid?)null;
         var name = CleanName(create.Name);
-        var keywords = locationId is null ? [] : (await LocationService.LoadTreeAsync(db, householdId, ct)).KeywordsFor(locationId);
+        var fromLocation = locationId is null ? [] : (await LocationService.LoadTreeAsync(db, householdId, ct)).KeywordsFor(locationId);
         db.Items.Add(new Item
         {
             Id = create.Id,
@@ -122,7 +122,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             AiNaming = create.PhotoExpected ? AiNaming.Pending : AiNaming.NotNeeded,
             Notes = CleanNotes(create.Notes),
             Quantity = CheckQuantity(create.Quantity),
-            Keywords = ItemKeywords.Merge(null, keywords),
+            Keywords = ItemKeywords.Join([ItemKeywords.New, .. fromLocation]),
             PhotoExpected = create.PhotoExpected,
             CreatedById = userId,
         });
@@ -146,13 +146,29 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         }
         if (keywords is not null && ItemKeywords.Join(keywords) is var joined && joined != item.Keywords)
         {
+            item.KeywordsFinal |= !ItemKeywords.DifferOnlyInNew(item.Keywords, joined);
             item.Keywords = joined;
-            item.KeywordsFinal = true;
         }
         if (item.AiNaming == AiNaming.Pending && !AiNamingService.NeedsAi(item))
             item.AiNaming = AiNaming.NotNeeded;
         item.Notes = CleanNotes(notes);
         item.Quantity = CheckQuantity(quantity);
+        item.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    // Only the keywords, for the editor that saves them as they change.
+    public async Task SetKeywordsAsync(string userId, Guid id, IReadOnlyList<string> keywords, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var item = await LoadAsync(db, userId, id, ct);
+        var joined = ItemKeywords.Join(keywords);
+        if (joined == (item.Keywords ?? ""))
+            return;
+        item.KeywordsFinal |= !ItemKeywords.DifferOnlyInNew(item.Keywords, joined);
+        item.Keywords = joined;
+        if (item.AiNaming == AiNaming.Pending && !AiNamingService.NeedsAi(item))
+            item.AiNaming = AiNaming.NotNeeded;
         item.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
@@ -286,7 +302,8 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         return new SearchResult(items, locations, tree);
     }
 
-    // Every keyword in the household with how many items have it, A to Z.
+    // Every keyword in the household with how many items have it, A to Z, plus the pinned ones without
+    // any items.
     public async Task<IReadOnlyList<KeywordCount>> KeywordsAsync(string userId, Guid householdId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -294,10 +311,69 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         var stored = await db.Items.AsNoTracking()
             .Where(i => i.HouseholdId == householdId && i.Keywords != null && i.Keywords != "")
             .Select(i => i.Keywords).ToListAsync(ct);
-        return stored.SelectMany(ItemKeywords.Split)
-            .GroupBy(k => k)
-            .Select(g => new KeywordCount(g.Key, g.Count()))
+        var counts = stored.SelectMany(ItemKeywords.Split).GroupBy(k => k).ToDictionary(g => g.Key, g => g.Count());
+        var settings = await db.KeywordSettings.AsNoTracking().Where(s => s.HouseholdId == householdId).ToDictionaryAsync(s => s.Word, ct);
+        return counts.Keys.Concat(settings.Values.Where(s => s.Pinned).Select(s => s.Word)).Distinct()
+            .Select(w => new KeywordCount(w, counts.GetValueOrDefault(w), settings.GetValueOrDefault(w)?.Color, settings.GetValueOrDefault(w)?.Pinned == true))
             .OrderBy(k => k.Keyword, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    // What to offer while someone types a keyword: also the ones so far only on locations.
+    public async Task<IReadOnlyList<KeywordCount>> KeywordSuggestionsAsync(string userId, Guid householdId, CancellationToken ct = default)
+    {
+        var known = await KeywordsAsync(userId, householdId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var onLocations = await db.Locations.AsNoTracking()
+            .Where(l => l.HouseholdId == householdId && l.Keywords != null)
+            .Select(l => l.Keywords).ToListAsync(ct);
+        var words = known.Select(k => k.Keyword).ToHashSet();
+        return known.Concat(onLocations.SelectMany(ItemKeywords.Split).Distinct().Where(w => !words.Contains(w)).Select(w => new KeywordCount(w, 0))).ToList();
+    }
+
+    public Task SetKeywordColorAsync(string userId, Guid householdId, string keyword, string? color, CancellationToken ct = default) =>
+        ChangeKeywordSettingAsync(userId, householdId, keyword, s => s.Color = LocationColors.IsKnown(color) ? color : null, ct);
+
+    public Task SetKeywordPinnedAsync(string userId, Guid householdId, string keyword, bool pinned, CancellationToken ct = default) =>
+        ChangeKeywordSettingAsync(userId, householdId, keyword, s => s.Pinned = pinned, ct);
+
+    private async Task ChangeKeywordSettingAsync(string userId, Guid householdId, string keyword, Action<KeywordSetting> change, CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var word = ItemKeywords.Clean([keyword]).FirstOrDefault() ?? throw new InputException("That's not a keyword.");
+        var setting = await db.KeywordSettings.FirstOrDefaultAsync(s => s.HouseholdId == householdId && s.Word == word, ct);
+        if (setting is null)
+            db.KeywordSettings.Add(setting = new KeywordSetting { HouseholdId = householdId, Word = word });
+        change(setting);
+        if (setting.Color is null && !setting.Pinned)
+            db.KeywordSettings.Remove(setting);
+        await db.SaveChangesAsync(ct);
+    }
+
+    // The scheduler's job: "new" comes off items older than their household's setting. Doesn't count
+    // as a person's edit. Returns how many items changed.
+    public async Task<int> RemoveExpiredNewKeywordAsync(CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var households = await db.Households.AsNoTracking().Where(h => h.NewKeywordDays > 0)
+            .Select(h => new { h.Id, h.NewKeywordDays }).ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        var changed = 0;
+        foreach (var household in households)
+        {
+            var cutoff = now.AddDays(-household.NewKeywordDays);
+            var candidates = await db.Items
+                .Where(i => i.HouseholdId == household.Id && i.CreatedAt < cutoff && i.Keywords != null && EF.Functions.Like(i.Keywords, "%" + ItemKeywords.New + "%"))
+                .ToListAsync(ct);
+            foreach (var item in candidates.Where(i => ItemKeywords.Split(i.Keywords).Contains(ItemKeywords.New)))
+            {
+                item.Keywords = ItemKeywords.Join(ItemKeywords.Split(item.Keywords).Where(k => k != ItemKeywords.New));
+                item.UpdatedAt = now;
+                changed++;
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        return changed;
     }
 
     public async Task<IReadOnlyList<ItemView>> WithKeywordAsync(string userId, Guid householdId, string keyword, CancellationToken ct = default)
@@ -310,7 +386,8 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
 
     // Renames a keyword on every item and location that has it; renaming it to one that exists merges
     // the two. An empty newKeyword removes it. Returns how many items changed. Counts as a person's
-    // edit, so the AI leaves those items' keywords alone afterwards.
+    // edit, so the AI leaves those items' keywords alone afterwards (except just taking "new" off). The
+    // keyword's color and pin go along; a pinned keyword that's removed stays, without items.
     public async Task<int> ReplaceKeywordAsync(string userId, Guid householdId, string keyword, string? newKeyword, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -322,8 +399,9 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         foreach (var item in items)
         {
             var words = ItemKeywords.Split(item.Keywords).Select(k => k == word ? replacement : k).OfType<string>();
-            item.Keywords = ItemKeywords.Join(words);
-            item.KeywordsFinal = true;
+            var joined = ItemKeywords.Join(words);
+            item.KeywordsFinal |= !ItemKeywords.DifferOnlyInNew(item.Keywords, joined);
+            item.Keywords = joined;
             item.UpdatedAt = now;
         }
         var locations = await db.Locations
@@ -331,6 +409,21 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             .ToListAsync(ct);
         foreach (var location in locations.Where(l => ItemKeywords.Split(l.Keywords).Contains(word)))
             location.Keywords = ItemKeywords.Merge(null, ItemKeywords.Split(location.Keywords).Select(k => k == word ? replacement : k).OfType<string>());
+        var setting = await db.KeywordSettings.FirstOrDefaultAsync(s => s.HouseholdId == householdId && s.Word == word, ct);
+        if (setting is not null && replacement is null && !setting.Pinned)
+            db.KeywordSettings.Remove(setting);
+        else if (setting is not null && replacement is not null && replacement != word)
+        {
+            var target = await db.KeywordSettings.FirstOrDefaultAsync(s => s.HouseholdId == householdId && s.Word == replacement, ct);
+            if (target is null)
+                db.KeywordSettings.Add(new KeywordSetting { HouseholdId = householdId, Word = replacement, Color = setting.Color, Pinned = setting.Pinned });
+            else
+            {
+                target.Color ??= setting.Color;
+                target.Pinned |= setting.Pinned;
+            }
+            db.KeywordSettings.Remove(setting);
+        }
         await db.SaveChangesAsync(ct);
         return items.Count;
     }
@@ -380,13 +473,28 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
 // An item's keywords: lower case, trimmed, no doubles, stored as "a, b, c".
 public static class ItemKeywords
 {
-    public static IReadOnlyList<string> Clean(IEnumerable<string> words) => words
-        .Select(w => string.Join(' ', w.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim('"', '.', ' ').ToLowerInvariant())
-        .Where(w => w.Length > 0)
-        .Select(w => w.Length > Item.MaxKeywordLength ? w[..Item.MaxKeywordLength].Trim() : w)
-        .Distinct()
-        .Take(Item.MaxKeywords)
-        .ToList();
+    // On every item added, until someone takes it off or its household's NewKeywordDays have passed.
+    public const string New = "new";
+
+    public static IReadOnlyList<string> Clean(IEnumerable<string> words)
+    {
+        var counted = 0;
+        return words
+            .Select(w => string.Join(' ', w.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim('"', '.', ' ').ToLowerInvariant())
+            .Where(w => w.Length > 0)
+            .Select(w => w.Length > Item.MaxKeywordLength ? w[..Item.MaxKeywordLength].Trim() : w)
+            .Distinct()
+            // These two say something about the item's state, so they neither use up the limit nor fall to it.
+            .Where(w => IsStatus(w) || counted++ < Item.MaxKeywords)
+            .ToList();
+    }
+
+    // Set by the app rather than describing the thing, so the AI isn't offered them to reuse.
+    public static bool IsStatus(string word) => word is New or AiNamer.UnsureKeyword;
+
+    // Taking "new" off (or putting it back) isn't an edit of what the item is, so the AI may still add its keywords.
+    public static bool DifferOnlyInNew(string? stored, string? other) =>
+        Split(stored).Where(k => k != New).SequenceEqual(Split(other).Where(k => k != New));
 
     public static IReadOnlyList<string> Split(string? stored) =>
         string.IsNullOrEmpty(stored) ? [] : stored.Split(", ", StringSplitOptions.RemoveEmptyEntries);

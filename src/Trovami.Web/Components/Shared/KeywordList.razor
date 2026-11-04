@@ -5,7 +5,7 @@
 <div class="page-head">
     <div>
         <h1>Keywords</h1>
-        <p class="page-sub">@Format.Count(Keywords.Count, "keyword", "keywords"). Pick one to see its items, or to rename, merge or remove it.</p>
+        <p class="page-sub">@Format.Count(Keywords.Count, "keyword", "keywords"). Pick one to see its items, to give it a color or pin it, or to rename, merge or remove it.</p>
     </div>
 </div>
 
@@ -20,7 +20,7 @@ else
 {
     var shown = Shown();
     <div class="item-table-tools">
-        <input class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter keywords" autocomplete="off" spellcheck="false" />
+        <input data-bwignore="true" class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter keywords" autocomplete="off" spellcheck="false" />
         <div class="segmented" role="radiogroup" aria-label="Order">
             <button type="button" role="radio" aria-checked="@(!_byCount ? "true" : "false")" class="@(!_byCount ? "on" : "")" @onclick="() => _byCount = false">A–Z</button>
             <button type="button" role="radio" aria-checked="@(_byCount ? "true" : "false")" class="@(_byCount ? "on" : "")" @onclick="() => _byCount = true">Most used</button>
@@ -33,7 +33,13 @@ else
     <div class="keyword-cloud">
         @foreach (var k in shown)
         {
-            <a class="keyword-link" href="@KeywordDetail.KeywordLink(k.Keyword)">@k.Keyword <span class="tree-count">@Format.Number(k.Items)</span></a>
+            <a class="keyword-link @(k.Color is null ? "" : "keyword-colored")" style="@Format.ColorVar(k.Color)" href="@KeywordDetail.KeywordLink(k.Keyword)">
+                @if (k.Pinned)
+                {
+                    <Icon Name="pin" Size="12" />
+                }
+                @k.Keyword <span class="tree-count">@Format.Number(k.Items)</span>
+            </a>
         }
     </div>
     @if (shown.Count == 0)

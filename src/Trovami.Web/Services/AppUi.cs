@@ -22,6 +22,19 @@ public sealed class AppUi
     // The Inbox count in the navigation.
     public int InboxCount { get; internal set; }
 
+    // The pinned keywords in the navigation, and every keyword's color for the chips.
+    public IReadOnlyList<KeywordCount> PinnedKeywords { get; private set; } = [];
+    public IReadOnlyDictionary<string, string> KeywordColors { get; private set; } = new Dictionary<string, string>();
+
+    internal void SetKeywords(IReadOnlyList<KeywordCount> keywords)
+    {
+        PinnedKeywords = keywords.Where(k => k.Pinned).ToList();
+        KeywordColors = keywords.Where(k => k.Color is not null).ToDictionary(k => k.Keyword, k => k.Color!);
+    }
+
+    // The last page before an item page, base-relative, for the item's Close; null after a direct link.
+    public string? BeforeItem { get; internal set; }
+
     // Raised after the household changed (switched, renamed, created) or the Inbox count did;
     // pages that show household data reload.
     public event Func<Task>? Changed;

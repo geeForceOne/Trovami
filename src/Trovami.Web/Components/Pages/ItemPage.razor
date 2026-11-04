@@ -55,7 +55,7 @@ else
                 <span>Name
                     @if (_item.NameSource == NameSource.Ai) {<span class="ai-chip" title="Named by AI from the photo">AI</span>}
                 </span>
-                <input class="input input-lg" @bind="_name" @bind:event="oninput" maxlength="@Item.MaxNameLength"
+                <input data-bwignore="true" class="input input-lg" @bind="_name" @bind:event="oninput" maxlength="@Item.MaxNameLength"
                        placeholder="@(_item.Naming ? "The AI is naming it…" : ItemView.UnnamedText)" />
                 @if (_item.Name is null && _item.AiNaming == AiNaming.Failed && _item.PhotoVersion is not null)
                 {
@@ -68,20 +68,21 @@ else
             <div class="field-row">
                 <label class="field">
                     <span>Quantity</span>
-                    <input class="input input-short" type="number" min="1" max="@Item.MaxQuantity" @bind="_quantity" @bind:event="oninput" />
+                    <input data-bwignore="true" class="input input-short" type="number" min="1" max="@Item.MaxQuantity" @bind="_quantity" @bind:event="oninput" />
                 </label>
             </div>
             <label class="field">
                 <span>Notes</span>
-                <textarea class="textarea" rows="4" @bind="_notes" @bind:event="oninput" maxlength="@Item.MaxNotesLength"></textarea>
+                <textarea data-bwignore="true" class="textarea" rows="4" @bind="_notes" @bind:event="oninput" maxlength="@Item.MaxNotesLength"></textarea>
             </label>
             <div class="field">
                 <label for="keyword-input">Keywords</label>
-                <KeywordEditor @bind-Keywords="_keywords" @bind-Typed="_newKeyword" Placeholder="@(_item.Naming ? "The AI is looking at it…" : "Add a keyword")" />
-                <span class="field-hint">Find also matches these. They come from its location and from the AI, which picks them from the photo; change them as you like. Separate them with a comma.</span>
+                <KeywordEditor Keywords="_keywords" Save="SaveKeywordsAsync" @bind-Typed="_newKeyword" HouseholdId="_item.HouseholdId" Placeholder="@(_item.Naming ? "The AI is looking at it…" : "Add a keyword")" />
+                <span class="field-hint">Find also matches these. They come from its location and from the AI, which picks them from the photo; change them as you like. Separate them with a comma; they save right away.</span>
             </div>
             <div class="actions">
                 <button type="submit" class="btn btn-primary" disabled="@(Busy || !Changed)">Save</button>
+                <button type="button" class="btn btn-secondary" @onclick="CloseAsync">Close</button>
                 @if (Changed)
                 {
                     <button type="button" class="btn btn-ghost" @onclick="Reset">Undo changes</button>
@@ -121,14 +122,10 @@ else
     // What's still being typed; Enter (or Save) takes it, see SaveAsync.
     private string _newKeyword = "";
 
+    // Keywords aren't part of this: they save as they change, only a half-typed one is still open.
     private bool Changed => _item is not null &&
         ((_name ?? "").Trim() != (_item.Name ?? "") || (_notes ?? "").Trim() != (_item.Notes ?? "") || _quantity != _item.Quantity
-         || !_keywords.SequenceEqual(_item.Keywords) || _newKeyword.Trim().Length > 0);
-
-    private void AddKeyword(string word)
-    {
-        _keywords = ItemKeywords.Clean(_keywords.Append(word)).ToList();
-    }
+         || _newKeyword.Trim().Length > 0);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -152,8 +149,7 @@ else
             // is typing or already added some.
             if (wasNaming && !_item.Naming && string.IsNullOrWhiteSpace(_name))
                 _name = _item.Name;
-            if (wasNaming && !_item.Naming && _keywords.Count == 0)
-                _keywords = _item.Keywords.ToList();
+            _keywords = _item.Keywords.ToList();
         }
         catch (NotFoundException)
         {
@@ -174,12 +170,12 @@ else
 
     private async Task SaveAsync()
     {
-        AddKeyword(_newKeyword);
+        var typed = _newKeyword;
         _newKeyword = "";
         if (await RunAsync(async () =>
         {
-            // Unchanged keywords aren't sent, so saving early doesn't stop the AI from adding them.
-            var keywords = _keywords.SequenceEqual(_item!.Keywords) ? null : _keywords;
+            // Sent only with a half-typed one to add, so saving early doesn't stop the AI from adding them.
+            var keywords = string.IsNullOrWhiteSpace(typed) ? null : ItemKeywords.Clean(_item!.Keywords.Append(typed));
             await Items.UpdateAsync(await UserIdAsync(), Id, _name, _notes, _quantity, keywords, PageToken);
             await LoadAsync();
         }))
@@ -187,6 +183,22 @@ else
             Reset();
             Ui.Toast.Success("Saved.");
         }
+    }
+
+    private async Task SaveKeywordsAsync(List<string> keywords)
+    {
+        _keywords = keywords;
+        await TryAsync(async () => await Items.SetKeywordsAsync(await UserIdAsync(), Id, keywords, PageToken));
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    // Back to the page the item was opened from; after a direct link, to where the item is.
+    private async Task CloseAsync()
+    {
+        if (Changed && !await Ui.Confirm.AskAsync("Discard your changes?", "What you changed on this item hasn't been saved.", "Discard", danger: true))
+            return;
+        Nav.NavigateTo(Ui.BeforeItem ?? (_tree.Find(_item?.LocationId) is { } l ? $"l/{l.ShortCode}" : "inbox"));
     }
 
     private async Task MoveAsync(Guid? locationId)

@@ -6,7 +6,7 @@
     <PhotoButton Label="Add with photos" Multiple="true" Disabled="Busy" OnPhoto="AddPhotoAsync" />
     <span class="muted small">or</span>
     <form class="inline-add" @onsubmit="AddNamedAsync" @onsubmit:preventDefault="true">
-        <input class="input" @bind="_name" @bind:event="oninput" placeholder="Type a name" maxlength="@Item.MaxNameLength" aria-label="New item name" />
+        <input data-bwignore="true" class="input" @bind="_name" @bind:event="oninput" placeholder="Type a name" maxlength="@Item.MaxNameLength" aria-label="New item name" />
         <button type="submit" class="btn btn-secondary btn-sm" disabled="@(Busy || string.IsNullOrWhiteSpace(_name))"><Icon Name="plus" Size="16" /> Add</button>
     </form>
     @if (_progress is not null)

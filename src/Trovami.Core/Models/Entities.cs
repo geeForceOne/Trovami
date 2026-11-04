@@ -78,6 +78,11 @@ public sealed class Household
     public string? AiModel { get; set; }
     public string? AiKeyProtected { get; set; }
 
+    // The keyword "new" comes off an item this many days after it was added; 0: only by hand.
+    public const int DefaultNewKeywordDays = 30;
+    public const int MaxNewKeywordDays = 3650;
+    public int NewKeywordDays { get; set; } = DefaultNewKeywordDays;
+
     public List<HouseholdMember> Members { get; set; } = [];
 }
 
@@ -141,12 +146,23 @@ public sealed class Location : ISynced
     public DateTime? DeletedAt { get; set; }
 }
 
+// What a household chose for one keyword. Keywords themselves are just words on items and locations,
+// so a row exists only for one with a color or a pin; a pinned one stays around without any items.
+public sealed class KeywordSetting
+{
+    public Guid HouseholdId { get; set; }
+    public string Word { get; set; } = "";
+    public string? Color { get; set; }
+    public bool Pinned { get; set; }
+}
+
 // A thing stored somewhere: at one location, or in the household's Inbox (LocationId null).
 public sealed class Item
 {
     public const int MaxNameLength = 120;
     public const int MaxNotesLength = 2000;
     public const int MaxQuantity = 1_000_000;
+    // "new" and "unsure" come on top of these; see ItemKeywords.Clean.
     public const int MaxKeywords = 20;
     public const int MaxKeywordLength = 40;
 

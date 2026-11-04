@@ -76,6 +76,26 @@ public abstract class AppPage : ComponentBase, IDisposable
         }
     }
 
+    // Like RunAsync, for a save that happens alongside whatever else the page is doing: it neither
+    // waits for Busy nor sets it.
+    protected async Task<bool> TryAsync(Func<Task> work)
+    {
+        try
+        {
+            await work();
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is InputException or NotFoundException or InvalidOperationException)
+        {
+            Ui.Toast.Error(ErrorText(ex));
+            return false;
+        }
+    }
+
     // Core's errors are already in words for people.
     protected static string ErrorText(Exception ex) => ex.Message;
 

@@ -143,7 +143,8 @@ public sealed class AiNamingService(
             stored.AddRange(await db.Locations.AsNoTracking()
                 .Where(l => l.HouseholdId == item.HouseholdId && l.Keywords != null)
                 .Select(l => l.Keywords).ToListAsync(ct));
-            known = stored.SelectMany(ItemKeywords.Split).GroupBy(k => k)
+            // Not "new" or "unsure": being on other items says nothing about this one.
+            known = stored.SelectMany(ItemKeywords.Split).Where(k => !ItemKeywords.IsStatus(k)).GroupBy(k => k)
                 .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
                 .Select(g => g.Key).Take(AiNamer.MaxKnownKeywords).ToList();
         }

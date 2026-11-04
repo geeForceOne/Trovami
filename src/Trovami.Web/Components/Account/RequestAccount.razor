@@ -26,21 +26,21 @@
         <EditForm Model="Input" method="post" OnSubmit="SendAsync" FormName="request-account" class="form">
             <label class="field">
                 <span>Email address</span>
-                <InputText @bind-Value="Input!.Email" type="email" class="input" autocomplete="email" autofocus />
+                <InputText data-bwignore="true" @bind-Value="Input!.Email" type="email" class="input" autocomplete="email" autofocus />
                 <span class="field-hint">You'll sign in with this.</span>
             </label>
             <label class="field">
                 <span>Name</span>
-                <InputText @bind-Value="Input!.Name" class="input" autocomplete="name" maxlength="@AppUser.MaxDisplayNameLength" />
+                <InputText data-bwignore="true" @bind-Value="Input!.Name" class="input" autocomplete="name" maxlength="@AppUser.MaxDisplayNameLength" />
             </label>
             <label class="field">
                 <span>About you <span class="muted">(optional)</span></span>
-                <InputTextArea @bind-Value="Input!.Message" class="textarea" rows="4" maxlength="@AccountRequest.MaxMessageLength" />
+                <InputTextArea data-bwignore="true" @bind-Value="Input!.Message" class="textarea" rows="4" maxlength="@AccountRequest.MaxMessageLength" />
                 <span class="field-hint">@($"Tell the administrator who you are and why you'd like to use {AppInfo.Name}.")</span>
             </label>
             @* A field people never see; only bots fill it in. *@
             <div class="visually-hidden" aria-hidden="true">
-                <label>Website <InputText @bind-Value="Input!.Website" tabindex="-1" autocomplete="off" /></label>
+                <label>Website <InputText data-bwignore="true" @bind-Value="Input!.Website" tabindex="-1" autocomplete="off" /></label>
             </div>
             @if (_error is not null)
             {

@@ -3,7 +3,7 @@
    (right and left open and close a branch), Enter chooses, Escape closes. Used wherever
    something moves. *@
 <div class="picker @(_open ? "open" : "")">
-    <input class="input picker-input" placeholder="@Placeholder" aria-label="@Placeholder" autocomplete="off" spellcheck="false"
+    <input data-bwignore="true" class="input picker-input" placeholder="@Placeholder" aria-label="@Placeholder" autocomplete="off" spellcheck="false"
            @bind="_text" @bind:event="oninput" @bind:after="Filter" @onfocus="Open" @onkeydown="OnKeyAsync" @ref="_input" />
     @if (_open)
     {

@@ -5,7 +5,7 @@
    empty for what's directly in it; the cards show it under the name. *@
 @{ var shown = Rows(); }
 <div class="item-table-tools">
-    <input class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter items" autocomplete="off" spellcheck="false" />
+    <input data-bwignore="true" class="input item-filter" type="search" @bind="_filter" @bind:event="oninput" placeholder="Filter" aria-label="Filter items" autocomplete="off" spellcheck="false" />
     @if (LocationId is not null)
     {
         <label class="check">
@@ -35,6 +35,10 @@ else if (shown.Count > 0)
                     @SortHeader("Qty", Column.Quantity, numeric: true)
                     @SortHeader("Where", Column.Where)
                     @SortHeader("Added", Column.Added)
+                    @if (RemoveKeyword is not null)
+                    {
+                        <th>Keywords</th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -57,6 +61,18 @@ else if (shown.Count > 0)
                         <td data-label="Qty" class="num">@Format.Number(item.Quantity)</td>
                         <td data-label="Where">@where</td>
                         <td data-label="Added" class="nowrap">@Format.Ago(item.CreatedAt)</td>
+                        @if (RemoveKeyword is { } remove)
+                        {
+                            <td data-label="Keywords" @onclick:stopPropagation="true">
+                                <div class="keyword-cell">
+                                    @foreach (var k in item.Keywords)
+                                    {
+                                        var color = Ui?.KeywordColors.GetValueOrDefault(k);
+                                        <span class="keyword @(color is null ? "" : "keyword-colored")" style="@Format.ColorVar(color)" @key="k">@k<button type="button" title="Remove" aria-label="@($"Remove {k} from {item.ShownName}")" @onclick="() => remove(item, k)"><Icon Name="x" Size="14" /></button></span>
+                                    }
+                                </div>
+                            </td>
+                        }
                     </tr>
                 }
             </tbody>
@@ -77,6 +93,11 @@ else if (Items.Count > 0)
 
     // Photo cards instead of the table.
     [Parameter] public bool Photos { get; set; }
+
+    // Set: the table also shows each item's keywords, whose x calls this.
+    [Parameter] public Func<ItemView, string, Task>? RemoveKeyword { get; set; }
+
+    [CascadingParameter] private AppUi? Ui { get; set; }
 
     private enum Column { Name, Quantity, Where, Added }
 

@@ -41,11 +41,11 @@ else
                 <form class="form" @onsubmit="SaveProfileAsync" @onsubmit:preventDefault="true">
                     <label class="field">
                         <span>Display name</span>
-                        <input class="input" @bind="_displayName" @bind:event="oninput" autocomplete="nickname" maxlength="@AppUser.MaxDisplayNameLength" />
+                        <input data-bwignore="true" class="input" @bind="_displayName" @bind:event="oninput" autocomplete="nickname" maxlength="@AppUser.MaxDisplayNameLength" />
                     </label>
                     <label class="field">
                         <span>Email address</span>
-                        <input class="input" type="email" @bind="_email" @bind:event="oninput" autocomplete="email" spellcheck="false" />
+                        <input data-bwignore="true" class="input" type="email" @bind="_email" @bind:event="oninput" autocomplete="email" spellcheck="false" />
                     </label>
                     @foreach (var e in _profileErrors)
                     {
@@ -206,7 +206,7 @@ else
                         <strong>Copy the token now</strong>
                         <div>It's shown only this once. If you lose it, create a new one.</div>
                         <div class="link-copy">
-                            <input class="input input-code" readonly value="@_newToken" aria-label="Token" onfocus="this.select()" />
+                            <input data-bwignore="true" class="input input-code" readonly value="@_newToken" aria-label="Token" onfocus="this.select()" />
                             <button type="button" class="btn btn-primary btn-sm" @onclick="() => CopyAsync(_newToken)"><Icon Name="copy" Size="15" /> Copy</button>
                         </div>
                     </div>

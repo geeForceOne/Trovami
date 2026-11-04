@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Trovami.Core.Services;
 
-public sealed record HouseholdView(Guid Id, string Name, bool IsOwner, string OwnerName, int Members);
+public sealed record HouseholdView(Guid Id, string Name, bool IsOwner, string OwnerName, int Members, int NewKeywordDays);
 
 public sealed record MemberView(string UserId, string Name, string? Email, bool IsOwner, DateTime JoinedAt);
 
@@ -21,13 +21,13 @@ public sealed class HouseholdService(IDbContextFactory<AppDbContext> dbFactory, 
             .Where(m => m.UserId == userId)
             .Select(m => new
             {
-                m.Household!.Id, m.Household.Name, m.Household.OwnerId,
+                m.Household!.Id, m.Household.Name, m.Household.OwnerId, m.Household.NewKeywordDays,
                 Owner = db.Users.Where(u => u.Id == m.Household.OwnerId).Select(u => new { u.DisplayName, u.Email, u.UserName }).First(),
                 Members = m.Household.Members.Count,
             })
             .ToListAsync(ct);
         return rows
-            .Select(r => new HouseholdView(r.Id, r.Name, r.OwnerId == userId, AppUser.ShownNameFor(r.Owner.DisplayName, r.Owner.Email, r.Owner.UserName), r.Members))
+            .Select(r => new HouseholdView(r.Id, r.Name, r.OwnerId == userId, AppUser.ShownNameFor(r.Owner.DisplayName, r.Owner.Email, r.Owner.UserName), r.Members, r.NewKeywordDays))
             .OrderBy(h => h.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
@@ -60,6 +60,17 @@ public sealed class HouseholdService(IDbContextFactory<AppDbContext> dbFactory, 
         await db.SaveChangesAsync(ct);
         await db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(s => s.SetProperty(u => u.CurrentHouseholdId, household.Id), ct);
         return household.Id;
+    }
+
+    // After how many days "new" comes off an item; 0: only by hand.
+    public async Task SetNewKeywordDaysAsync(string userId, Guid householdId, int days, CancellationToken ct = default)
+    {
+        if (days is < 0 or > Household.MaxNewKeywordDays)
+            throw new InputException($"Enter up to {Household.MaxNewKeywordDays} days, or leave it empty to keep \"new\" until it's removed by hand.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var household = await Access.RequireOwnerAsync(db, userId, householdId, ct);
+        household.NewKeywordDays = days;
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task RenameAsync(string userId, Guid householdId, string name, CancellationToken ct = default)

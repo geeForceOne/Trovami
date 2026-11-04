@@ -1,0 +1,16 @@
+@* The fixed palette as swatches, "no color" first; for locations and keywords. *@
+<div class="swatches" role="radiogroup" aria-label="Color">
+    <button type="button" class="swatch swatch-none @(Value is null ? "on" : "")" role="radio" aria-checked="@(Value is null ? "true" : "false")" title="No color" aria-label="No color" disabled="@Disabled" @onclick="() => PickAsync(null)"><Icon Name="x" Size="14" /></button>
+    @foreach (var (key, label) in LocationColors.All)
+    {
+        <button type="button" class="swatch @(Value == key ? "on" : "")" style="--loc:var(--c-@key)" role="radio" aria-checked="@(Value == key ? "true" : "false")" title="@label" aria-label="@label" disabled="@Disabled" @onclick="() => PickAsync(key)"></button>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private Task PickAsync(string? color) => ValueChanged.InvokeAsync(color);
+}

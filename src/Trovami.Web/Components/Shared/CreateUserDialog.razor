@@ -9,7 +9,7 @@
             <form class="form" @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
                 <label class="field">
                     <span>Email address</span>
-                    <input class="input" type="email" @bind="_email" @bind:event="oninput" @ref="_emailInput" autocomplete="off" spellcheck="false" />
+                    <input data-bwignore="true" class="input" type="text" inputmode="email" @bind="_email" @bind:event="oninput" @ref="_emailInput" autocomplete="off" spellcheck="false" />
                     <span class="field-hint">
                         They sign in with this.
                         @(_emailOn ? "The invite link goes here too." : "Email isn't set up, so you'll get the invite link to pass on yourself.")
@@ -17,7 +17,7 @@
                 </label>
                 <label class="field">
                     <span>Display name</span>
-                    <input class="input" @bind="_name" @bind:event="oninput" autocomplete="off" maxlength="@AppUser.MaxDisplayNameLength" />
+                    <input data-bwignore="true" class="input" @bind="_name" @bind:event="oninput" autocomplete="off" maxlength="@AppUser.MaxDisplayNameLength" />
                     <span class="field-hint">@($"What {AppInfo.Name} calls them. They can change it later.")</span>
                 </label>
                 <label class="check">
