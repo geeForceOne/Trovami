@@ -70,7 +70,7 @@ else
                 <PhotoButton Label="@(_item.PhotoVersion is null ? "Add photo" : "Replace photo")" Disabled="Busy" OnPhoto="SetPhotoAsync" />
                 @if (_item.PhotoVersion is not null)
                 {
-                    <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="StartCrop">Crop photo</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-crop-start disabled="@Busy" @onclick="StartCrop">Crop photo (Ctrl+C)</button>
                     <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="RemovePhotoAsync">Remove photo</button>
                 }
             </div>

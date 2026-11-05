@@ -1,5 +1,15 @@
 # Release notes
 
+## 1.3.1 - 2026-11-05
+
+### New
+
+- Press Ctrl+C on an item's page to crop its photo.
+
+### Fixed
+
+- Going from a keyword back to the Inventory returns to the last location you had open.
+
 ## 1.3.0 - 2026-11-05
 
 ### New

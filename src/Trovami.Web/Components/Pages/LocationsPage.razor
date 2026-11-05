@@ -12,8 +12,9 @@
    page, so the tree keeps what's open while moving between locations. Under the tree, the most
    used keywords (all of them at /k): a picked one shows its items on the right. On phones it's
    one column: the tree, or the picked location or keyword with a way back. Coming to the page without
-   a location opens the last one picked, per browser and household; the links inside the page still
-   lead back to the overview. *@
+   a location opens the last one picked, per browser and household, and so does a link from a keyword
+   to the Inventory where there are two columns; the other links inside the page still lead back to
+   the overview. *@
 <PageTitle>@(Word is not null ? Word : AllKeywords ? "Keywords" : Id is not null && _tree.Find(Id) is { } shown ? shown.Name : "Inventory") · @AppInfo.Name</PageTitle>
 
 @if (!_loaded)
@@ -155,7 +156,7 @@ else
     // The tree shows only this many keywords, the most used; /k lists them all.
     private const int TopKeywordCount = 12;
 
-    private bool AllKeywords => Word is null && Key is null && Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/') == "k";
+    private bool AllKeywords => Word is null && Key is null && RelativePath(Nav.Uri) == "k";
 
     // The most used, A to Z, plus the pinned ones (phones have no side menu to show them in) and the
     // picked one when they aren't among them.
@@ -180,9 +181,11 @@ else
     private LocationDialog _newDialog = default!;
     private const string LastLocationPref = "lastLocation.";
     private Guid? _rememberedId;
+    private bool _onKeywordRoute;
 
     protected override async Task OnInitializedAsync()
     {
+        _onKeywordRoute = IsKeywordRoute(Nav.Uri);
         Nav.LocationChanged += OnLocationChanged;
         ReloadOnHouseholdChange(async () =>
         {
@@ -201,8 +204,30 @@ else
     }
 
     // Between / and /k no route parameter changes, so Blazor wouldn't render the page again by itself.
-    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
-        _ = InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        var fromKeyword = _onKeywordRoute;
+        _onKeywordRoute = IsKeywordRoute(e.Location);
+        var toOverview = RelativePath(e.Location).Length == 0;
+        _ = InvokeAsync(async () =>
+        {
+            StateHasChanged();
+            if (fromKeyword && toOverview)
+                await ReturnToLastLocationAsync();
+        });
+    }
+
+    private async Task ReturnToLastLocationAsync()
+    {
+        // With one column the Inventory is the tree, the way from a keyword to any location.
+        if (await JS.InvokeAsync<bool>("trovami.isOneColumn")) return;
+        if (await LastLocationLinkAsync() is { } last && RelativePath(Nav.Uri).Length == 0)
+            Nav.NavigateTo(last, replace: true);
+    }
+
+    private string RelativePath(string uri) => Nav.ToBaseRelativePath(uri).Split('?', '#')[0].TrimEnd('/');
+
+    private bool IsKeywordRoute(string uri) => RelativePath(uri) is var path && (path == "k" || path.StartsWith("k/", StringComparison.Ordinal));
 
     public override void Dispose()
     {
