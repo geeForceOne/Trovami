@@ -2,6 +2,57 @@
 window.trovami = {
     scrollToTop: () => window.scrollTo({ top: 0, behavior: "instant" }),
 
+    // The photo cropper: a rectangle over the photo, as fractions of it. Dragging a corner resizes it,
+    // dragging inside moves it, dragging anywhere else draws a new one.
+    cropStart: (frame) => {
+        const box = frame.querySelector(".crop-box");
+        const limit = (v) => Math.min(1, Math.max(0, v));
+        let area = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+        let drag = null;
+        const draw = () => {
+            box.style.left = area.x * 100 + "%";
+            box.style.top = area.y * 100 + "%";
+            box.style.width = area.w * 100 + "%";
+            box.style.height = area.h * 100 + "%";
+        };
+        const point = (e) => {
+            const r = frame.getBoundingClientRect();
+            return { x: limit((e.clientX - r.left) / r.width), y: limit((e.clientY - r.top) / r.height), width: r.width, height: r.height };
+        };
+        const between = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) });
+        frame.onpointerdown = (e) => {
+            const p = point(e);
+            const reach = e.pointerType === "touch" ? 32 : 18;
+            const near = (cx, cy) => Math.abs(p.x - cx) * p.width <= reach && Math.abs(p.y - cy) * p.height <= reach;
+            const right = area.x + area.w, bottom = area.y + area.h;
+            const before = area;
+            if (near(area.x, area.y)) drag = { anchor: { x: right, y: bottom }, before };
+            else if (near(right, area.y)) drag = { anchor: { x: area.x, y: bottom }, before };
+            else if (near(area.x, bottom)) drag = { anchor: { x: right, y: area.y }, before };
+            else if (near(right, bottom)) drag = { anchor: { x: area.x, y: area.y }, before };
+            else if (p.x > area.x && p.x < right && p.y > area.y && p.y < bottom) drag = { offset: { x: p.x - area.x, y: p.y - area.y }, before };
+            else drag = { anchor: { x: p.x, y: p.y }, before };
+            frame.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        };
+        frame.onpointermove = (e) => {
+            if (!drag) return;
+            const p = point(e);
+            area = drag.anchor
+                ? between(drag.anchor, p)
+                : { ...area, x: limit(Math.min(p.x - drag.offset.x, 1 - area.w)), y: limit(Math.min(p.y - drag.offset.y, 1 - area.h)) };
+            draw();
+        };
+        frame.onpointerup = frame.onpointercancel = () => {
+            // A click or a tiny drag isn't a selection: the one before it stays.
+            if (drag && (area.w < 0.02 || area.h < 0.02)) { area = drag.before; draw(); }
+            drag = null;
+        };
+        frame.cropArea = () => area;
+        draw();
+    },
+    cropArea: (frame) => frame.cropArea(),
+
     // Per-browser preferences. Storage can be unavailable (private mode, blocked site data),
     // so failures fall back to the default instead of breaking the page.
     getPref: (key) => {
@@ -100,6 +151,15 @@ window.trovami = {
     // Scrolls an element into view.
     scrollIntoView: (selector) => document.querySelector(selector)?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
 };
+
+// Left and Right press the item page's previous and next buttons, so they behave just like those.
+// Not while typing (the arrows move the cursor there), in a dialog, or while cropping a photo.
+document.addEventListener("keydown", (e) => {
+    if ((e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    if (document.querySelector(".modal, .crop-frame")) return;
+    document.querySelector(`.item-pager button[aria-label="${e.key === "ArrowLeft" ? "Previous" : "Next"} item"]`)?.click();
+});
 
 // The height left beside a phone's keyboard, so a dialog and its fixed buttons stay above it.
 if (window.visualViewport) {

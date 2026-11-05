@@ -119,14 +119,9 @@ public sealed class AiNamingService(
         }
 
         var household = await db.Households.AsNoTracking().FirstAsync(h => h.Id == item.HouseholdId, ct);
-        var key = _protector.Read(household.AiKeyProtected);
-        var provider = household.AiProvider;
-        var apiKey = key.Status == SecretStatus.Set ? key.Value : null;
-        var model = household.AiModel ?? AiModels.DefaultFor(provider);
-        if ((provider == AiProvider.None || apiKey is null) && DevFallback is { } dev)
-            (provider, apiKey, model) = (dev.Provider, dev.Key, AiModels.DefaultFor(dev.Provider));
+        var namer = NamerFor(household);
         var jpeg = await photos.ReadAsync(item.HouseholdId, item.Id, ct);
-        if (provider == AiProvider.None || apiKey is null || jpeg is null)
+        if (namer is null || jpeg is null)
         {
             await SetStateAsync(db, itemId, AiNaming.Failed, new AiDescription(null, []), ct);
             return;
@@ -152,8 +147,7 @@ public sealed class AiNamingService(
         AiDescription seen;
         try
         {
-            var namer = NamerFactory(provider, apiKey, model);
-            seen = await namer.DescribeAsync(jpeg, known, ct);
+            seen = await namer.DescribeAsync(jpeg, known, AiLanguages.For(household.AiLanguage), ct);
         }
         catch (AiException ex)
         {
@@ -163,6 +157,18 @@ public sealed class AiNamingService(
         var named = seen.Name is not null || item.Name is not null || item.NameSource == NameSource.Person;
         var described = seen.Keywords.Count > 0 || item.KeywordsFinal;
         await SetStateAsync(db, itemId, named && described ? AiNaming.NotNeeded : AiNaming.Failed, seen, ct);
+    }
+
+    // The household's AI; null when it has none, or its key can't be read.
+    internal IAiNamer? NamerFor(Household household)
+    {
+        var key = _protector.Read(household.AiKeyProtected);
+        var provider = household.AiProvider;
+        var apiKey = key.Status == SecretStatus.Set ? key.Value : null;
+        var model = household.AiModel ?? AiModels.DefaultFor(provider);
+        if ((provider == AiProvider.None || apiKey is null) && DevFallback is { } dev)
+            (provider, apiKey, model) = (dev.Provider, dev.Key, AiModels.DefaultFor(dev.Provider));
+        return provider == AiProvider.None || apiKey is null ? null : NamerFactory(provider, apiKey, model);
     }
 
     // Each part only if nobody filled it in meanwhile: what a person typed always wins.

@@ -15,6 +15,7 @@ public sealed class PhotoStore(StoragePaths paths)
     public const int ThumbSide = 400;
     public const int MaxUploadBytes = 20 * 1024 * 1024;
     private const int Quality = 82;
+    private const int MinCropSide = 16;
 
     // Saves a photo for the item or location `id`, replacing an earlier one. Returns the new
     // version (see Item.PhotoVersion). Throws InputException when it isn't an image.
@@ -32,6 +33,33 @@ public sealed class PhotoStore(StoragePaths paths)
         await WriteAtomicAsync(Path.Combine(dir, FileName(id, PhotoSize.Full)), full, ct);
         await WriteAtomicAsync(Path.Combine(dir, FileName(id, PhotoSize.Thumb)), thumb, ct);
         return Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
+    }
+
+    // Cuts the stored photo down to a part of it, given as fractions of its width and height, and
+    // replaces it: the rest is gone. Returns the new version.
+    public async Task<string> CropAsync(Guid householdId, Guid id, double x, double y, double width, double height, CancellationToken ct = default)
+    {
+        var bytes = await ReadAsync(householdId, id, ct) ?? throw new NotFoundException("This item has no photo to crop.");
+        var (full, thumb) = Crop(bytes, x, y, width, height);
+        var dir = Path.Combine(paths.PhotosPath, householdId.ToString("N"));
+        await WriteAtomicAsync(Path.Combine(dir, FileName(id, PhotoSize.Full)), full, ct);
+        await WriteAtomicAsync(Path.Combine(dir, FileName(id, PhotoSize.Thumb)), thumb, ct);
+        return Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
+    }
+
+    internal static (byte[] Full, byte[] Thumb) Crop(byte[] jpeg, double x, double y, double width, double height)
+    {
+        using var source = SKBitmap.Decode(jpeg) ?? throw new InputException("That photo couldn't be read.");
+        var left = (int)Math.Round(Math.Clamp(x, 0, 1) * source.Width);
+        var top = (int)Math.Round(Math.Clamp(y, 0, 1) * source.Height);
+        var right = (int)Math.Round(Math.Clamp(x + width, 0, 1) * source.Width);
+        var bottom = (int)Math.Round(Math.Clamp(y + height, 0, 1) * source.Height);
+        if (right - left < MinCropSide || bottom - top < MinCropSide)
+            throw new InputException("That part of the photo is too small. Select a bigger part.");
+        using var part = new SKBitmap();
+        if (!source.ExtractSubset(part, new SKRectI(left, top, right, bottom)))
+            throw new InputException("That photo couldn't be cropped.");
+        return (Encode(part, MaxSide), Encode(part, ThumbSide));
     }
 
     // The file of a photo, or null when there's none.

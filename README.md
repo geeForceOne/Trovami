@@ -11,7 +11,8 @@
 - **Android app for adding fast.** Scan an NFC tag or QR label, take a photo, done. It works offline in the cellar and syncs later. Without a tag, items land in the Inbox.
 - **Inbox.** Give each new item its place from the web app, several at once if you like.
 - **Keywords.** Words Find also matches, from you, the AI or the location. Typing suggests the ones you already use, each can have a color, and pinned ones stay in the menu. New items get "new", and the AI marks what it isn't sure of with "unsure".
-- **AI naming.** An item added with just a photo gets its name and keywords from Claude or ChatGPT, using the household's own key. It's optional, and a name you typed is never overwritten.
+- **AI naming.** An item added with just a photo gets its name and keywords from Claude or ChatGPT, using the household's own key. It's optional, and a name you typed is never overwritten. Each household picks the AI's language, and can translate what's already there in one go.
+- **Photos.** Crop an item's photo right on its page.
 - **Tags.** Link NFC tags on the phone, or print QR labels from the web app, including Dymo labels.
 - **Households.** Invite people by email. Everyone in a household sees and edits everything in it.
 - **Backups.** Daily automatic backups with photos included, a download with an optional password, and restore from the admin pages.

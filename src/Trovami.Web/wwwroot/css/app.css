@@ -1131,6 +1131,28 @@ td.num, th.num, .num.right { text-align: right; }
 .item-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
 .item-big-photo { display: grid; gap: 12px; }
 .item-big-photo img { display: block; width: 100%; max-height: 70vh; object-fit: contain; border-radius: var(--r-lg); background: var(--sheet-2); }
+.crop-frame {
+    position: relative;
+    width: fit-content;
+    max-width: 100%;
+    overflow: hidden;
+    border-radius: var(--r-lg);
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+}
+.item-big-photo .crop-frame img { width: auto; max-width: 100%; max-height: 70vh; border-radius: 0; pointer-events: none; }
+.crop-box {
+    position: absolute;
+    outline: 1px solid #fff;
+    box-shadow: 0 0 0 100vmax rgb(0 0 0 / 55%);
+    cursor: move;
+    background:
+        linear-gradient(#fff, #fff) 0 0 / 12px 12px no-repeat,
+        linear-gradient(#fff, #fff) 100% 0 / 12px 12px no-repeat,
+        linear-gradient(#fff, #fff) 0 100% / 12px 12px no-repeat,
+        linear-gradient(#fff, #fff) 100% 100% / 12px 12px no-repeat;
+}
 .item-nophoto-lg { aspect-ratio: 4 / 3; border-radius: var(--r-lg); background: var(--sheet-2); }
 .item-form { gap: 16px; }
 .item-where { padding-top: 6px; border-top: 1px solid var(--rule); }
