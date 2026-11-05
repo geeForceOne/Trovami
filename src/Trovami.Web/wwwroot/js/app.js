@@ -148,6 +148,9 @@ window.trovami = {
         place();
     },
 
+    // True where the location page shows one column, the same width as in app.css.
+    isOneColumn: () => matchMedia("(max-width: 700px)").matches,
+
     // Scrolls an element into view.
     scrollIntoView: (selector) => document.querySelector(selector)?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
 };
@@ -159,6 +162,19 @@ document.addEventListener("keydown", (e) => {
     if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
     if (document.querySelector(".modal, .crop-frame")) return;
     document.querySelector(`.item-pager button[aria-label="${e.key === "ArrowLeft" ? "Previous" : "Next"} item"]`)?.click();
+});
+
+// Ctrl+C presses the item page's Crop photo button. Copying comes first: not with text selected or
+// in a field. Not in a dialog either. While cropping the button is gone, so it does nothing then, and
+// applying a crop, which can't be undone, always takes the Crop button.
+document.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() !== "c" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.repeat) return;
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    if (document.querySelector(".modal") || !window.getSelection().isCollapsed) return;
+    const crop = document.querySelector("[data-crop-start]");
+    if (!crop || crop.disabled) return;
+    e.preventDefault();
+    crop.click();
 });
 
 // The height left beside a phone's keyboard, so a dialog and its fixed buttons stay above it.
