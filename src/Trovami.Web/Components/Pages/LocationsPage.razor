@@ -183,6 +183,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        Nav.LocationChanged += OnLocationChanged;
         ReloadOnHouseholdChange(async () =>
         {
             await ReloadAsync();
@@ -197,6 +198,16 @@ else
         if (Key is null && Word is null && !AllKeywords && await LastLocationLinkAsync() is { } last)
             Nav.NavigateTo(last, replace: true);
         _loaded = true;
+    }
+
+    // Between / and /k no route parameter changes, so Blazor wouldn't render the page again by itself.
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        _ = InvokeAsync(StateHasChanged);
+
+    public override void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        base.Dispose();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

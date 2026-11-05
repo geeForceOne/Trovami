@@ -346,6 +346,13 @@ namespace Trovami.Core.Data.Migrations
                     b.Property<string>("AiKeyProtected")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AiLanguage")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("en");
+
                     b.Property<string>("AiModel")
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");

@@ -2,6 +2,7 @@
 @inherits AppPage
 @inject ItemService Items
 @inject LocationService Locations
+@inject IJSRuntime JS
 
 <PageTitle>@(_item?.ShownName ?? "Item") · @AppInfo.Name</PageTitle>
 
@@ -32,16 +33,28 @@ else
         @if (_neighbors is { Count: > 1 } n)
         {
             <div class="item-pager">
-                <button type="button" class="btn btn-ghost btn-sm" disabled="@(n.Previous is null)" title="Previous item" aria-label="Previous item" @onclick="() => GoToAsync(n.Previous)"><Icon Name="left" Size="16" /></button>
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@(n.Previous is null)" title="Previous item (Left arrow)" aria-label="Previous item" @onclick="() => GoToAsync(n.Previous)"><Icon Name="left" Size="16" /></button>
                 <span class="muted small">@($"{Format.Number(n.Position)} of {Format.Number(n.Count)}")</span>
-                <button type="button" class="btn btn-ghost btn-sm" disabled="@(n.Next is null)" title="Next item" aria-label="Next item" @onclick="() => GoToAsync(n.Next)"><Icon Name="right" Size="16" /></button>
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@(n.Next is null)" title="Next item (Right arrow)" aria-label="Next item" @onclick="() => GoToAsync(n.Next)"><Icon Name="right" Size="16" /></button>
             </div>
         }
     </div>
 
     <div class="item-page">
         <div class="item-big-photo">
-            @if (_item.PhotoVersion is { } v)
+            @if (_cropping && _item.PhotoVersion is { } cropped)
+            {
+                <div class="crop-frame" @ref="_cropFrame">
+                    <img src="@Format.ItemPhoto(_item.Id, cropped, thumb: false)" alt="@_item.ShownName" draggable="false" />
+                    <div class="crop-box"></div>
+                </div>
+                <p class="field-hint">Drag over the photo to pick the part to keep. Cropping replaces the photo, so the rest can't be brought back.</p>
+                <div class="actions">
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@Busy" @onclick="ApplyCropAsync">Crop</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _cropping = false">Cancel</button>
+                </div>
+            }
+            else if (_item.PhotoVersion is { } v)
             {
                 <a href="@Format.ItemPhoto(_item.Id, v, thumb: false)" target="_blank"><img src="@Format.ItemPhoto(_item.Id, v, thumb: false)" alt="@_item.ShownName" /></a>
             }
@@ -51,13 +64,17 @@ else
                     @if (_item.PhotoExpected) {<span class="muted small">The photo arrives when the phone syncs.</span>}
                 </div>
             }
+            @if (!_cropping)
+            {
             <div class="actions">
                 <PhotoButton Label="@(_item.PhotoVersion is null ? "Add photo" : "Replace photo")" Disabled="Busy" OnPhoto="SetPhotoAsync" />
                 @if (_item.PhotoVersion is not null)
                 {
+                    <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="StartCrop">Crop photo</button>
                     <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="RemovePhotoAsync">Remove photo</button>
                 }
             </div>
+            }
         </div>
 
         <form class="form item-form" @onsubmit="SaveAsync" @onsubmit:preventDefault="true">
@@ -132,6 +149,11 @@ else
     private List<string> _keywords = [];
     // What's still being typed; Enter (or Save) takes it, see SaveAsync.
     private string _newKeyword = "";
+    private bool _cropping;
+    private bool _cropStarting;
+    private ElementReference _cropFrame;
+
+    private sealed record CropArea(double X, double Y, double W, double H);
 
     // Keywords aren't part of this: they save as they change, only a half-typed one is still open.
     private bool Changed => _item is not null &&
@@ -140,6 +162,7 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        _cropping = false;
         await LoadAsync();
         Reset();
     }
@@ -242,6 +265,32 @@ else
             await Items.SetPhotoAsync(await UserIdAsync(), Id, stream, PageToken);
             await LoadAsync();
         });
+    }
+
+    private void StartCrop()
+    {
+        _cropping = true;
+        _cropStarting = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_cropStarting && _cropping)
+        {
+            _cropStarting = false;
+            await JS.InvokeVoidAsync("trovami.cropStart", _cropFrame);
+        }
+    }
+
+    private async Task ApplyCropAsync()
+    {
+        var area = await JS.InvokeAsync<CropArea>("trovami.cropArea", _cropFrame);
+        if (await RunAsync(async () =>
+        {
+            await Items.CropPhotoAsync(await UserIdAsync(), Id, area.X, area.Y, area.W, area.H, PageToken);
+            await LoadAsync();
+        }))
+            _cropping = false;
     }
 
     private async Task RemovePhotoAsync()

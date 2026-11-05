@@ -1,3 +1,4 @@
+using Trovami.Core.Ai;
 using Trovami.Core.Data;
 using Trovami.Core.Models;
 using Trovami.Core.Photos;
@@ -5,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Trovami.Core.Services;
 
-public sealed record HouseholdView(Guid Id, string Name, bool IsOwner, string OwnerName, int Members, int NewKeywordDays);
+public sealed record HouseholdView(Guid Id, string Name, bool IsOwner, string OwnerName, int Members, int NewKeywordDays, string AiLanguage);
 
 public sealed record MemberView(string UserId, string Name, string? Email, bool IsOwner, DateTime JoinedAt);
 
@@ -21,13 +22,13 @@ public sealed class HouseholdService(IDbContextFactory<AppDbContext> dbFactory, 
             .Where(m => m.UserId == userId)
             .Select(m => new
             {
-                m.Household!.Id, m.Household.Name, m.Household.OwnerId, m.Household.NewKeywordDays,
+                m.Household!.Id, m.Household.Name, m.Household.OwnerId, m.Household.NewKeywordDays, m.Household.AiLanguage,
                 Owner = db.Users.Where(u => u.Id == m.Household.OwnerId).Select(u => new { u.DisplayName, u.Email, u.UserName }).First(),
                 Members = m.Household.Members.Count,
             })
             .ToListAsync(ct);
         return rows
-            .Select(r => new HouseholdView(r.Id, r.Name, r.OwnerId == userId, AppUser.ShownNameFor(r.Owner.DisplayName, r.Owner.Email, r.Owner.UserName), r.Members, r.NewKeywordDays))
+            .Select(r => new HouseholdView(r.Id, r.Name, r.OwnerId == userId, AppUser.ShownNameFor(r.Owner.DisplayName, r.Owner.Email, r.Owner.UserName), r.Members, r.NewKeywordDays, r.AiLanguage))
             .OrderBy(h => h.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
@@ -70,6 +71,23 @@ public sealed class HouseholdService(IDbContextFactory<AppDbContext> dbFactory, 
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var household = await Access.RequireOwnerAsync(db, userId, householdId, ct);
         household.NewKeywordDays = days;
+        await db.SaveChangesAsync(ct);
+    }
+
+    // Sets the language of what the AI writes from now on. "new" and "unsure" go along on all items;
+    // that isn't a person's edit, so the AI's own keywords can still come.
+    public async Task SetAiLanguageAsync(string userId, Guid householdId, string code, CancellationToken ct = default)
+    {
+        if (AiLanguages.All.All(l => l.Code != code))
+            throw new InputException("Pick a language from the list.");
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var household = await Access.RequireOwnerAsync(db, userId, householdId, ct);
+        var (from, to) = (AiLanguages.For(household.AiLanguage), AiLanguages.For(code));
+        if (from == to)
+            return;
+        household.AiLanguage = to.Code;
+        var words = new Dictionary<string, string> { [from.New] = to.New, [from.Unsure] = to.Unsure };
+        await ItemService.RenameKeywordsAsync(db, householdId, words, onLocations: false, ct);
         await db.SaveChangesAsync(ct);
     }
 

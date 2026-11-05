@@ -372,11 +372,13 @@ public class ServiceTests
 
     private sealed class RecordingNamer(List<IReadOnlyList<string>> seen) : IAiNamer
     {
-        public Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct)
+        public Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, AiLanguage language, CancellationToken ct)
         {
             seen.Add(known);
             return Task.FromResult(new AiDescription("Thing", ["metal"]));
         }
+
+        public Task<string> AskAsync(string instructions, string text, CancellationToken ct) => throw new NotSupportedException();
     }
 
     [Fact]
@@ -884,10 +886,12 @@ public class ServiceTests
     {
         public IReadOnlyList<string> Known { get; private set; } = [];
 
-        public Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, CancellationToken ct)
+        public Task<AiDescription> DescribeAsync(byte[] jpeg, IReadOnlyList<string> known, AiLanguage language, CancellationToken ct)
         {
             Known = known;
             return Task.FromResult(new AiDescription(name, keywords));
         }
+
+        public Task<string> AskAsync(string instructions, string text, CancellationToken ct) => throw new NotSupportedException();
     }
 }

@@ -8,7 +8,8 @@
     [Parameter] public EventCallback OnTick { get; set; }
 
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(3);
-    private const int MaxTicks = 40;
+    // Longer for work that takes longer than naming a photo.
+    [Parameter] public int MaxTicks { get; set; } = 40;
     private CancellationTokenSource? _cts;
 
     protected override void OnParametersSet()

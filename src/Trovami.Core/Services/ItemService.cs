@@ -120,7 +120,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
     public async Task<bool> CreateAsync(string userId, Guid householdId, ItemCreate create, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var household = await Access.RequireMemberAsync(db, userId, householdId, ct);
         if (await db.Items.AnyAsync(i => i.Id == create.Id, ct))
         {
             if (await db.Items.AnyAsync(i => i.Id == create.Id && i.HouseholdId == householdId, ct))
@@ -145,7 +145,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             AiNaming = create.PhotoExpected ? AiNaming.Pending : AiNaming.NotNeeded,
             Notes = CleanNotes(create.Notes),
             Quantity = CheckQuantity(create.Quantity),
-            Keywords = ItemKeywords.Join([ItemKeywords.New, .. fromLocation]),
+            Keywords = ItemKeywords.Join([AiLanguages.For(household.AiLanguage).New, .. fromLocation]),
             PhotoExpected = create.PhotoExpected,
             CreatedById = userId,
         });
@@ -256,6 +256,23 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         var item = await LoadAsync(db, userId, id, ct);
         item.PhotoVersion = await photos.SaveAsync(item.HouseholdId, id, photo, ct);
         item.PhotoExpected = false;
+        if (AiNamingService.NeedsAi(item))
+            item.AiNaming = AiNaming.Pending;
+        item.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        if (item.AiNaming == AiNaming.Pending)
+            naming.Enqueue(item.Id);
+    }
+
+    // Replaces the item's photo with a part of it; x, y, width and height are fractions of the photo.
+    // Like a new photo, it gives the AI another look when it still has something to do.
+    public async Task CropPhotoAsync(string userId, Guid id, double x, double y, double width, double height, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var item = await LoadAsync(db, userId, id, ct);
+        if (item.PhotoVersion is null)
+            throw new InputException("This item has no photo to crop.");
+        item.PhotoVersion = await photos.CropAsync(item.HouseholdId, id, x, y, width, height, ct);
         if (AiNamingService.NeedsAi(item))
             item.AiNaming = AiNaming.Pending;
         item.UpdatedAt = DateTime.UtcNow;
@@ -379,18 +396,19 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var households = await db.Households.AsNoTracking().Where(h => h.NewKeywordDays > 0)
-            .Select(h => new { h.Id, h.NewKeywordDays }).ToListAsync(ct);
+            .Select(h => new { h.Id, h.NewKeywordDays, h.AiLanguage }).ToListAsync(ct);
         var now = DateTime.UtcNow;
         var changed = 0;
         foreach (var household in households)
         {
             var cutoff = now.AddDays(-household.NewKeywordDays);
+            var word = AiLanguages.For(household.AiLanguage).New;
             var candidates = await db.Items
-                .Where(i => i.HouseholdId == household.Id && i.CreatedAt < cutoff && i.Keywords != null && EF.Functions.Like(i.Keywords, "%" + ItemKeywords.New + "%"))
+                .Where(i => i.HouseholdId == household.Id && i.CreatedAt < cutoff && i.Keywords != null && EF.Functions.Like(i.Keywords, "%" + word + "%"))
                 .ToListAsync(ct);
-            foreach (var item in candidates.Where(i => ItemKeywords.Split(i.Keywords).Contains(ItemKeywords.New)))
+            foreach (var item in candidates.Where(i => ItemKeywords.Split(i.Keywords).Contains(word)))
             {
-                item.Keywords = ItemKeywords.Join(ItemKeywords.Split(item.Keywords).Where(k => k != ItemKeywords.New));
+                item.Keywords = ItemKeywords.Join(ItemKeywords.Split(item.Keywords).Where(k => k != word));
                 item.UpdatedAt = now;
                 changed++;
             }
@@ -451,6 +469,43 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
         return items.Count;
     }
 
+    // Changes keywords throughout a household in one go, taking their colors and pins along; two that
+    // become the same word merge. Not a person's edit, so the AI's plans for the items stay. The caller saves.
+    internal static async Task RenameKeywordsAsync(AppDbContext db, Guid householdId, IReadOnlyDictionary<string, string> words, bool onLocations, CancellationToken ct)
+    {
+        string Renamed(string word) => words.GetValueOrDefault(word, word);
+        var now = DateTime.UtcNow;
+        var items = await db.Items.Where(i => i.HouseholdId == householdId && i.Keywords != null && i.Keywords != "").ToListAsync(ct);
+        foreach (var item in items)
+        {
+            var joined = ItemKeywords.Join(ItemKeywords.Split(item.Keywords).Select(Renamed));
+            if (joined == item.Keywords)
+                continue;
+            item.Keywords = joined;
+            item.UpdatedAt = now;
+        }
+        if (onLocations)
+        {
+            var locations = await db.Locations.Where(l => l.HouseholdId == householdId && l.Keywords != null).ToListAsync(ct);
+            foreach (var location in locations)
+                location.Keywords = ItemKeywords.Merge(null, ItemKeywords.Split(location.Keywords).Select(Renamed));
+        }
+
+        var settings = await db.KeywordSettings.Where(s => s.HouseholdId == householdId).ToListAsync(ct);
+        var wanted = settings.GroupBy(s => Renamed(s.Word)).ToDictionary(g => g.Key, g => (
+            Color: g.OrderBy(s => s.Word == g.Key ? 0 : 1).Select(s => s.Color).FirstOrDefault(c => c is not null),
+            Pinned: g.Any(s => s.Pinned)));
+        foreach (var setting in settings)
+        {
+            if (wanted.TryGetValue(setting.Word, out var value))
+                (setting.Color, setting.Pinned) = value;
+            else
+                db.KeywordSettings.Remove(setting);
+        }
+        foreach (var (word, value) in wanted.Where(w => settings.All(s => s.Word != w.Key)))
+            db.KeywordSettings.Add(new KeywordSetting { HouseholdId = householdId, Word = word, Color = value.Color, Pinned = value.Pinned });
+    }
+
     private static async Task<List<Item>> HavingKeywordAsync(AppDbContext db, Guid householdId, string keyword, CancellationToken ct)
     {
         var word = ItemKeywords.Clean([keyword]).FirstOrDefault() ?? "";
@@ -497,6 +552,7 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
 public static class ItemKeywords
 {
     // On every item added, until someone takes it off or its household's NewKeywordDays have passed.
+    // This is the English word; a household's own is in AiLanguages.
     public const string New = "new";
 
     public static IReadOnlyList<string> Clean(IEnumerable<string> words)
@@ -513,11 +569,11 @@ public static class ItemKeywords
     }
 
     // Set by the app rather than describing the thing, so the AI isn't offered them to reuse.
-    public static bool IsStatus(string word) => word is New or AiNamer.UnsureKeyword;
+    public static bool IsStatus(string word) => AiLanguages.IsStatus(word);
 
     // Taking "new" off (or putting it back) isn't an edit of what the item is, so the AI may still add its keywords.
     public static bool DifferOnlyInNew(string? stored, string? other) =>
-        Split(stored).Where(k => k != New).SequenceEqual(Split(other).Where(k => k != New));
+        Split(stored).Where(k => !AiLanguages.IsNew(k)).SequenceEqual(Split(other).Where(k => !AiLanguages.IsNew(k)));
 
     public static IReadOnlyList<string> Split(string? stored) =>
         string.IsNullOrEmpty(stored) ? [] : stored.Split(", ", StringSplitOptions.RemoveEmptyEntries);

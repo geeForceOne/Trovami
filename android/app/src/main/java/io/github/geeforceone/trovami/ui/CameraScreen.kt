@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -70,7 +71,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 
-private val Scrim = Color.Black.copy(alpha = 0.55f)
+// The buttons' background, on the dark bars around the picture.
+private val Scrim = Color.White.copy(alpha = 0.14f)
 
 // The app's home: the camera, aimed at the Inbox or at the location of the last scanned tag.
 // Each press of the shutter saves an item; the camera stays ready for the next one, until it's idle.
@@ -120,16 +122,13 @@ fun CameraScreen(model: MainViewModel) {
         })
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (model.cameraPaused) {
-            CameraPausedView(onResume = { model.cameraPaused = false })
-        } else {
-            WithCameraPermission { CameraPreview(Modifier.fillMaxSize(), capture) }
-        }
-        if (flash) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.5f)))
-
+    // The picture has the photo's own 3:4 shape, so it shows what gets saved, and it stays clear of the
+    // buttons. It gets smaller when the details and the keyboard need the room.
+    Column(
+        Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding(),
+    ) {
         Column(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp),
+            Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(Modifier.fillMaxWidth()) {
@@ -148,8 +147,19 @@ fun CameraScreen(model: MainViewModel) {
             UpdateBanner(model)
         }
 
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Box(Modifier.aspectRatio(3f / 4f).clip(RoundedCornerShape(12.dp))) {
+                if (model.cameraPaused) {
+                    CameraPausedView(onResume = { model.cameraPaused = false })
+                } else {
+                    WithCameraPermission { CameraPreview(Modifier.fillMaxSize(), capture) }
+                }
+                if (flash) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.5f)))
+            }
+        }
+
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().imePadding().padding(16.dp),
+            Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (detailsOpen) DetailsCard(model)

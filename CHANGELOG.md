@@ -1,5 +1,22 @@
 # Release notes
 
+## 1.3.0 - 2026-11-05
+
+### New
+
+- Crop an item's photo right on its page.
+- Choose the language for the AI's names and keywords, per household: English, Dutch, French, German, Italian, Portuguese or Spanish.
+- Translate a household's item names, notes and keywords into its language in one go.
+- Use the Left and Right arrow keys to go to the previous or next item.
+
+### Improved
+
+- The phone app's camera picture is smaller and shows exactly what the photo will show, with the buttons and details beside it instead of on top.
+
+### Fixed
+
+- The "All keywords" link on the Inventory page now always opens the list.
+
 ## 1.2.0 - 2026-11-04
 
 ### New

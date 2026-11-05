@@ -83,6 +83,9 @@ public sealed class Household
     public const int MaxNewKeywordDays = 3650;
     public int NewKeywordDays { get; set; } = DefaultNewKeywordDays;
 
+    // The language of the AI's names and keywords and of "new" and "unsure"; see AiLanguages.
+    public string AiLanguage { get; set; } = Ai.AiLanguages.DefaultCode;
+
     public List<HouseholdMember> Members { get; set; } = [];
 }
 

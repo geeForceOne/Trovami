@@ -4,6 +4,9 @@
 @inject HouseholdInviteService Invites
 @using Trovami.Core.Security
 @inject AiNamingService Ai
+@inject AiTranslationService Translation
+@inject Trovami.Core.Backup.BackupService Backups
+@inject ILogger<HouseholdPage> Log
 
 <PageTitle>Household · @AppInfo.Name</PageTitle>
 
@@ -155,17 +158,80 @@
 
         @if (household.IsOwner)
         {
+            var language = AiLanguages.For(household.AiLanguage);
+            <section class="setting">
+                <div class="setting-intro">
+                    <h2>Language</h2>
+                    <p>The AI writes names and keywords in this language, and the keywords "@language.New" and "@language.Unsure" follow it. @AppInfo.Name's own pages stay in US English.</p>
+                </div>
+                <div class="setting-body">
+                    <form class="form" @onsubmit="SaveLanguageAsync" @onsubmit:preventDefault="true">
+                        <label class="field">
+                            <span>Language</span>
+                            <select class="select" @bind="_language">
+                                @foreach (var l in AiLanguages.All)
+                                {
+                                    <option value="@l.Code">@l.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <div class="actions">
+                            <button type="submit" class="btn btn-primary" disabled="@(Busy || _language == household.AiLanguage)">Save</button>
+                        </div>
+                    </form>
+
+                    <NamingWatcher Active="_translation?.Running == true" OnTick="RefreshTranslationAsync" MaxTicks="1200" />
+                    <div class="form invite-form">
+                        <h3>Translate everything</h3>
+                        @if (_translation is { Running: true } running)
+                        {
+                            <p class="notice" role="status">@($"Translating into {running.LanguageName}{(running.Total > 0 ? $": {Format.Number(running.Done)} of {Format.Number(running.Total)} done" : "")}. You can leave this page.")</p>
+                        }
+                        else
+                        {
+                            @if (_translation is { } finished)
+                            {
+                                <p class="notice @(finished.Failed == 0 ? "notice-good" : "notice-warn")" role="status">
+                                    @(finished.Failed == 0 ? $"Everything is translated into {finished.LanguageName}." : $"Translated into {finished.LanguageName}, except {Format.Number(finished.Failed)} that stayed as they were. Translating again only changes what isn't in {finished.LanguageName} yet.")
+                                    @finished.Error
+                                </p>
+                            }
+                            <p class="muted">Puts what's already here into @language.Name: item names (typed ones too), item notes, and the keywords of items and locations. Location names, notes and labels stay as they are.</p>
+                            @if (_counts is { } c)
+                            {
+                                <p class="muted">@($"That's {Format.Count(c.Names, "name", "names")}, {Format.Count(c.Notes, "note", "notes")} and {Format.Count(c.Keywords, "keyword", "keywords")}. It uses this household's AI key and can't be undone.")</p>
+                                @if (_isAdmin)
+                                {
+                                    <label class="check"><input type="checkbox" @bind="_backupFirst" /> Make a backup first</label>
+                                }
+                                else
+                                {
+                                    <p class="field-hint">Only an admin can make a backup. Ask them first if you want one.</p>
+                                }
+                                @if (!c.HasAi)
+                                {
+                                    <p class="field-hint">Set up the AI above first.</p>
+                                }
+                                <div class="actions">
+                                    <button type="button" class="btn btn-secondary" disabled="@(Busy || !c.HasAi || c.Total == 0 || _language != household.AiLanguage)" @onclick="TranslateAsync">Translate into @language.Name</button>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </section>
+
             <section class="setting">
                 <div class="setting-intro">
                     <h2>New items</h2>
-                    <p>Every item added gets the keyword "new", so you can go through what came in. Take it off by hand, or let it come off by itself after a while.</p>
+                    <p>Every item added gets the keyword "@language.New", so you can go through what came in. Take it off by hand, or let it come off by itself after a while.</p>
                 </div>
                 <div class="setting-body">
                     <form class="form" @onsubmit="SaveNewKeywordDaysAsync" @onsubmit:preventDefault="true">
                         <label class="field">
-                            <span>Remove "new" after this many days</span>
+                            <span>Remove "@language.New" after this many days</span>
                             <input data-bwignore="true" class="input input-short" type="number" min="1" max="@Trovami.Core.Models.Household.MaxNewKeywordDays" @bind="_newKeywordDays" @bind:event="oninput" autocomplete="off" />
-                            <span class="field-hint">Leave it empty to keep "new" until it's removed by hand.</span>
+                            <span class="field-hint">Leave it empty to keep "@language.New" until it's removed by hand.</span>
                         </label>
                         <div class="actions">
                             <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
@@ -224,6 +290,11 @@
     private string _key = "";
     private string _newName = "";
     private int? _newKeywordDays;
+    private string _language = AiLanguages.DefaultCode;
+    private TranslationCounts? _counts;
+    private TranslationStatus? _translation;
+    private bool _isAdmin;
+    private bool _backupFirst = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -242,6 +313,10 @@
         _members = await Households.MembersAsync(userId, h.Id, PageToken);
         _invites = h.IsOwner ? await Households.InvitesAsync(userId, h.Id, PageToken) : [];
         _ai = h.IsOwner ? await Ai.GetSettingsAsync(userId, h.Id, PageToken) : null;
+        _language = h.AiLanguage;
+        _isAdmin = await IsAdminAsync();
+        _counts = h.IsOwner ? await Translation.CountsAsync(userId, h.Id, PageToken) : null;
+        _translation = h.IsOwner ? Translation.StatusOf(h.Id) : null;
         if (_ai is not null)
         {
             _provider = _ai.Provider;
@@ -318,6 +393,53 @@
             await Ui.RefreshAsync();
         }))
             Ui.Toast.Success(_newKeywordDays is null ? "Saved. \"new\" now stays until it's removed by hand." : "Saved.");
+    }
+
+    private async Task SaveLanguageAsync()
+    {
+        if (await RunAsync(async () =>
+        {
+            await Households.SetAiLanguageAsync(await UserIdAsync(), Household!.Id, _language, PageToken);
+            await Ui.RefreshAsync();
+        }))
+            Ui.Toast.Success($"Saved. The AI now writes in {AiLanguages.For(_language).Name}.");
+    }
+
+    private async Task RefreshTranslationAsync()
+    {
+        if (Household is not { } h)
+            return;
+        _translation = Translation.StatusOf(h.Id);
+        if (_translation is { Running: false })
+            _counts = await Translation.CountsAsync(await UserIdAsync(), h.Id, PageToken);
+    }
+
+    private async Task TranslateAsync()
+    {
+        var h = Household!;
+        var name = AiLanguages.For(h.AiLanguage).Name;
+        var c = _counts!;
+        if (!await Ui.Confirm.AskAsync($"Translate everything into {name}?",
+            $"{Format.Count(c.Names, "name", "names")}, {Format.Count(c.Notes, "note", "notes")} and {Format.Count(c.Keywords, "keyword", "keywords")} change for everyone in the household, typed names too. This uses the household's AI key and can't be undone.",
+            "Translate", danger: true))
+            return;
+        await RunAsync(async () =>
+        {
+            if (_isAdmin && _backupFirst)
+            {
+                try
+                {
+                    await Backups.CreateStoredAsync("manual-", Trovami.Core.Backup.BackupService.MaxKeep, PageToken);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Log.LogError(ex, "The backup before translating failed");
+                    throw new InputException("The backup failed, so nothing was translated.");
+                }
+            }
+            await Translation.StartAsync(await UserIdAsync(), h.Id, PageToken);
+            _translation = Translation.StatusOf(h.Id);
+        });
     }
 
     private async Task DeleteAsync()

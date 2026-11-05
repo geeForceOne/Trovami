@@ -85,6 +85,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
         b.Entity<Household>(e =>
         {
+            e.Property(x => x.AiLanguage).HasMaxLength(8).HasDefaultValue(Ai.AiLanguages.DefaultCode);
             // Deleting the owner's account is refused while they own households (see UserAdminService).
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
             e.Property(x => x.Name).HasMaxLength(Household.MaxNameLength);

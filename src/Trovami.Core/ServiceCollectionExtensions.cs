@@ -13,7 +13,7 @@ public static class ServiceCollectionExtensions
 {
     // Registers persistence and the Core services. The host is responsible for Data Protection
     // (key storage location), Identity, calling Scheduler.RunOnceAsync every minute and running
-    // AiNamingService.RunAsync.
+    // AiNamingService.RunAsync and AiTranslationService.RunAsync.
     public static IServiceCollection AddTrovamiCore(this IServiceCollection services, StoragePaths paths)
     {
         services.AddSingleton(paths);
@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SyncService>();
         services.AddSingleton<AiNamingQueue>();
         services.AddSingleton<AiNamingService>();
+        services.AddSingleton<AiTranslationService>();
         services.AddSingleton<BackupService>();
         services.AddSingleton<Scheduler>();
         services.AddSingleton<AccountRequestService>();
