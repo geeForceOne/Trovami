@@ -73,6 +73,34 @@ data class SyncPushResult(val locations: List<PushResult>, val tags: List<PushRe
 @Serializable
 data class AppRelease(val version: String, val apkUrl: String? = null, val notes: String? = null, val pageUrl: String = "")
 
+// An item in find mode, straight from the server. name is null for an unnamed item.
+@Serializable
+data class PhoneItem(
+    val id: String,
+    val householdId: String,
+    val name: String? = null,
+    val shownName: String,
+    val naming: Boolean = false,
+    val notes: String? = null,
+    val quantity: Int = 1,
+    val locationId: String? = null,
+    val path: String = "",
+    val photoVersion: String? = null,
+    val keywords: List<String> = emptyList(),
+)
+
+@Serializable
+data class PhoneKeyword(val keyword: String, val color: String? = null)
+
+@Serializable
+private data class NameRequest(val name: String?)
+
+@Serializable
+private data class KeywordsRequest(val keywords: List<String>)
+
+@Serializable
+private data class LocationRequest(val locationId: String?)
+
 @Serializable
 private data class PairRequest(val code: String, val deviceName: String, val appVersion: String)
 
@@ -115,6 +143,44 @@ class Api(private val appVersion: String) {
         send(request(session.server, session.token, "items/$itemId/photo").put(photo.asRequestBody("image/jpeg".toMediaType())).build())
     }
 
+    // ----- Find mode (online only) -----
+
+    suspend fun search(session: Session, householdId: String, query: String): List<PhoneItem> =
+        get(session, "households/$householdId/items/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}").let(json::decodeFromString)
+
+    suspend fun itemsBelow(session: Session, householdId: String, locationId: String): List<PhoneItem> =
+        get(session, "households/$householdId/locations/$locationId/items").let(json::decodeFromString)
+
+    suspend fun inbox(session: Session, householdId: String): List<PhoneItem> =
+        get(session, "households/$householdId/inbox").let(json::decodeFromString)
+
+    suspend fun keywords(session: Session, householdId: String): List<PhoneKeyword> =
+        get(session, "households/$householdId/keywords").let(json::decodeFromString)
+
+    suspend fun item(session: Session, id: String): PhoneItem = get(session, "items/$id").let(json::decodeFromString)
+
+    suspend fun rename(session: Session, id: String, name: String?): PhoneItem =
+        put(session, "items/$id/name", json.encodeToString(NameRequest(name))).let(json::decodeFromString)
+
+    suspend fun setKeywords(session: Session, id: String, keywords: List<String>): PhoneItem =
+        put(session, "items/$id/keywords", json.encodeToString(KeywordsRequest(keywords))).let(json::decodeFromString)
+
+    // locationId null: to the Inbox.
+    suspend fun move(session: Session, id: String, locationId: String?): PhoneItem =
+        put(session, "items/$id/location", json.encodeToString(LocationRequest(locationId))).let(json::decodeFromString)
+
+    suspend fun delete(session: Session, id: String) {
+        send(request(session.server, session.token, "items/$id").delete().build())
+    }
+
+    // The photo's JPEG bytes; thumb: the small version for lists.
+    suspend fun photo(session: Session, id: String, thumb: Boolean): ByteArray = withContext(Dispatchers.IO) {
+        http.newCall(request(session.server, session.token, "items/$id/photo?thumb=$thumb").get().build()).execute().use { response ->
+            if (!response.isSuccessful) throw ApiException(response.code, defaultMessage(response.code))
+            response.body.bytes()
+        }
+    }
+
     // Null when the server doesn't know a release (yet).
     suspend fun latestRelease(session: Session): AppRelease? {
         val body = send(request(session.server, session.token, "app/latest").get().build())
@@ -142,6 +208,12 @@ class Api(private val appVersion: String) {
             }
         }
     }
+
+    private suspend fun get(session: Session, path: String): String =
+        send(request(session.server, session.token, path).get().build())
+
+    private suspend fun put(session: Session, path: String, body: String): String =
+        send(request(session.server, session.token, path).put(body.toRequestBody(jsonType)).build())
 
     private suspend fun post(server: String, token: String?, path: String, body: String): String =
         send(request(server, token, path).post(body.toRequestBody(jsonType)).build())

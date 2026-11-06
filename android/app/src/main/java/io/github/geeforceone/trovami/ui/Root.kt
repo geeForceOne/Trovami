@@ -44,9 +44,7 @@ fun TrovamiRoot(model: MainViewModel) {
 
     val state = prefs
     val signedIn = state?.session != null
-    BackHandler(enabled = signedIn && model.screen != Screen.Camera) {
-        model.screen = if ((model.screen as? Screen.LinkTag)?.setup == true) Screen.SetUpTags else Screen.Camera
-    }
+    BackHandler(enabled = signedIn && model.screen != Screen.Camera, onBack = model::back)
 
     // A Surface, not a plain background, so text and icons get the theme's content color.
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -59,8 +57,12 @@ fun TrovamiRoot(model: MainViewModel) {
                     is Screen.LinkTag -> LinkTagScreen(model, screen)
                     Screen.PickTarget -> PickTargetScreen(model)
                     Screen.SetUpTags -> SetUpTagsScreen(model)
-                    Screen.ScanQr -> ScanQrScreen(model)
+                    is Screen.ScanQr -> ScanQrScreen(model, screen)
                     Screen.Settings -> SettingsScreen(model)
+                    Screen.Find -> FindScreen(model)
+                    is Screen.Contents -> ContentsScreen(model, screen)
+                    is Screen.ItemDetail -> ItemScreen(model)
+                    is Screen.Move -> MoveScreen(model, screen)
                 }
             }
             // Above the camera's shutter row, so a message never hides it.

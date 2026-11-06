@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Nfc
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Remove
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -133,13 +134,17 @@ fun CameraScreen(model: MainViewModel) {
         ) {
             Box(Modifier.fillMaxWidth()) {
                 val hasNfc = remember { NfcAdapter.getDefaultAdapter(context) != null }
-                TargetChip(model, Modifier.align(Alignment.CenterStart).padding(end = if (hasNfc) 120.dp else 64.dp))
+                TargetChip(model, Modifier.align(Alignment.CenterStart).padding(end = if (hasNfc) 176.dp else 120.dp))
                 Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // For the impatient: closes the camera now instead of after the idle time.
                     if (hasNfc && !model.cameraPaused) {
                         Surface(color = Scrim, contentColor = Color.White, shape = CircleShape) {
                             IconButton(onClick = { model.cameraPaused = true }) { Icon(Icons.Outlined.Nfc, contentDescription = "Scan a tag") }
                         }
+                    }
+                    // Switches to find mode: search, move, rename, keywords, delete.
+                    Surface(color = Scrim, contentColor = Color.White, shape = CircleShape) {
+                        IconButton(onClick = model::enterFind) { Icon(Icons.Outlined.Search, contentDescription = "Find things") }
                     }
                     CameraMenu(model)
                 }
@@ -249,7 +254,7 @@ private fun CameraMenu(model: MainViewModel) {
             DropdownMenuItem(
                 text = { Text("Scan a QR label") },
                 leadingIcon = { Icon(Icons.Outlined.QrCodeScanner, null) },
-                onClick = { open = false; model.screen = Screen.ScanQr },
+                onClick = { open = false; model.screen = Screen.ScanQr() },
             )
             DropdownMenuItem(
                 text = { Text("Add to a location") },

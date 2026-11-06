@@ -2,6 +2,10 @@ package io.github.geeforceone.trovami.ui
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.LruCache
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import android.net.Uri
 import android.nfc.Tag
 import android.os.Build
@@ -21,6 +25,8 @@ import io.github.geeforceone.trovami.data.TagRow
 import io.github.geeforceone.trovami.net.Api
 import io.github.geeforceone.trovami.net.ApiException
 import io.github.geeforceone.trovami.net.AppRelease
+import io.github.geeforceone.trovami.net.PhoneItem
+import io.github.geeforceone.trovami.net.PhoneKeyword
 import io.github.geeforceone.trovami.nfc.TagRead
 import io.github.geeforceone.trovami.nfc.TrovamiTags
 import io.github.geeforceone.trovami.photo.Photos
@@ -28,6 +34,8 @@ import io.github.geeforceone.trovami.sync.SyncWorker
 import io.github.geeforceone.trovami.update.Updates
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -61,7 +69,20 @@ sealed interface Screen {
     // Tags one after another, without the camera (some phones read no tags while it's open).
     data object SetUpTags : Screen
 
-    data object ScanQr : Screen
+    // back: where the scan returns to, which also decides what a scanned label does.
+    data class ScanQr(val back: Screen = Camera) : Screen
+
+    // ----- Find mode: search, look into a location, rename, keywords, move, delete. Online only. -----
+
+    data object Find : Screen
+
+    // The items in a location and below it; null: the Inbox.
+    data class Contents(val locationId: String?) : Screen
+
+    data class ItemDetail(val id: String, val from: Screen) : Screen
+
+    // Picking the item's new location, by tag, label or from the list.
+    data class Move(val itemId: String, val from: Screen) : Screen
 
     data object Settings : Screen
 }
@@ -209,7 +230,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Photos.deleteAll(app)
         }
         targetId.value = null
-        screen = Screen.Camera
+        leaveFind()
     }
 
     private fun deviceName(): String {
@@ -219,8 +240,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ----- Tags and labels -----
 
-    // A trovami:// link from an NFC tag, a QR label or the pairing code.
-    fun openUri(raw: String) {
+    // A trovami:// link from an NFC tag, a QR label or the pairing code. external: it opened the app
+    // (or brought it back), which always means adding, as when the app was closed.
+    fun openUri(raw: String, external: Boolean = false) {
+        if (external && finding) leaveFind()
         if (raw.startsWith("trovami://pair", ignoreCase = true)) {
             viewModelScope.launch {
                 if (prefs.session() == null) pair(raw) else say("This phone is already signed in.")
@@ -238,6 +261,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val setup = screen == Screen.SetUpTags
         val tag = dao.tag(code)
+        (screen as? Screen.Move)?.let { move ->
+            val location = tag?.let { dao.location(it.locationId) }
+            if (location == null) say("This tag isn't linked to a location yet.") else moveTo(move, location)
+            return@launch
+        }
+        if (finding && tag != null && !setup) {
+            if (prefs.current().householdId != tag.householdId) prefs.setHousehold(tag.householdId)
+            showContents(tag.locationId)
+            return@launch
+        }
         if (tag == null) {
             screen = Screen.LinkTag(code, written = false, setup = setup)
             return@launch
@@ -281,6 +314,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             setUpFound = null
             setUpLinked = location.name
             screen = Screen.SetUpTags
+            return@launch
+        }
+        if (finding) {
+            say("Tag linked to ${location.name}")
+            showContents(location.id)
             return@launch
         }
         aim(location.householdId, location.id)
@@ -359,6 +397,278 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun syncNow() {
         SyncWorker.request(app)
         say("Syncing…")
+    }
+
+    // ----- Find mode -----
+
+    var finding by mutableStateOf(false)
+        private set
+
+    // The last call couldn't reach the server; find mode says so until one gets through.
+    var offline by mutableStateOf(false)
+        private set
+
+    var query by mutableStateOf("")
+        private set
+    var results by mutableStateOf<List<PhoneItem>>(emptyList())
+        private set
+    var searching by mutableStateOf(false)
+        private set
+    private var searchJob: Job? = null
+
+    // The open location's items (null while they load), and the open item.
+    var contents by mutableStateOf<List<PhoneItem>?>(null)
+        private set
+    var item by mutableStateOf<PhoneItem?>(null)
+        private set
+    var itemBusy by mutableStateOf(false)
+        private set
+    var keywords by mutableStateOf<List<PhoneKeyword>>(emptyList())
+        private set
+
+    fun enterFind() {
+        finding = true
+        cameraPaused = true
+        screen = Screen.Find
+        viewModelScope.launch { loadKeywords() }
+    }
+
+    fun leaveFind() {
+        finding = false
+        searchJob?.cancel()
+        query = ""
+        results = emptyList()
+        contents = null
+        item = null
+        offline = false
+        photoCache.evictAll()
+        cameraPaused = false
+        screen = Screen.Camera
+    }
+
+    // From a location's contents straight to adding there.
+    fun addHere(location: LocationRow) {
+        leaveFind()
+        aimAt(location)
+    }
+
+    // Where Back goes from each screen.
+    fun back() {
+        screen = when (val s = screen) {
+            is Screen.LinkTag -> if (s.setup) Screen.SetUpTags else home()
+            is Screen.ScanQr -> s.back
+            is Screen.ItemDetail -> s.from
+            is Screen.Move -> s.from
+            is Screen.Contents -> Screen.Find
+            Screen.Find -> {
+                leaveFind()
+                return
+            }
+            else -> home()
+        }
+    }
+
+    private fun home(): Screen = if (finding) Screen.Find else Screen.Camera
+
+    // Searches as the user types, a moment after the last key.
+    fun updateQuery(text: String) {
+        query = text
+        searchJob?.cancel()
+        if (text.isBlank()) {
+            results = emptyList()
+            searching = false
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(300)
+            runSearch()
+        }
+    }
+
+    private suspend fun runSearch() {
+        val household = prefState.value?.householdId ?: return
+        val text = query.trim()
+        if (text.isEmpty()) return
+        searching = true
+        try {
+            online { app.api.search(it, household, text) }?.let { if (query.trim() == text) results = it }
+        } finally {
+            searching = false
+        }
+    }
+
+    fun showContents(locationId: String?) {
+        contents = null
+        screen = Screen.Contents(locationId)
+        viewModelScope.launch { loadContents(locationId) }
+    }
+
+    private suspend fun loadContents(locationId: String?) {
+        val household = prefState.value?.householdId ?: return
+        val loaded = online { if (locationId == null) app.api.inbox(it, household) else app.api.itemsBelow(it, household, locationId) }
+        if (contentsScreen()?.locationId == locationId) contents = loaded ?: contents ?: emptyList()
+    }
+
+    // After "no connection": everything on the screen again.
+    fun retry() = viewModelScope.launch {
+        when (val s = screen) {
+            is Screen.Contents -> loadContents(s.locationId)
+            is Screen.ItemDetail -> online { app.api.item(it, s.id) }?.let(::changed)
+            else -> runSearch()
+        }
+        loadKeywords()
+    }
+
+    fun openItem(row: PhoneItem) {
+        item = row
+        screen = Screen.ItemDetail(row.id, screen)
+        viewModelScope.launch { online { app.api.item(it, row.id) }?.let(::changed) }
+    }
+
+    // A typed name is a person's name: the AI leaves it alone. Empty: an unnamed item.
+    fun rename(name: String) = edit { session, current -> app.api.rename(session, current.id, name.trim().ifEmpty { null }) }
+
+    fun addKeyword(word: String) {
+        val clean = word.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+        val current = item ?: return
+        if (clean.isEmpty() || clean in current.keywords) return
+        edit { session, it -> app.api.setKeywords(session, it.id, it.keywords + clean) }
+    }
+
+    fun removeKeyword(word: String) = edit { session, it -> app.api.setKeywords(session, it.id, it.keywords - word) }
+
+    fun startMove() {
+        val current = item ?: return
+        screen = Screen.Move(current.id, screen)
+    }
+
+    // location null: to the Inbox.
+    fun moveTo(move: Screen.Move, location: LocationRow?) {
+        if (location?.pending == true) {
+            SyncWorker.request(app)
+            say("${location.name} isn't on the server yet. Try again once the phone has synced.")
+            return
+        }
+        if (itemBusy) return
+        viewModelScope.launch {
+            itemBusy = true
+            try {
+                val moved = online { app.api.move(it, move.itemId, location?.id) } ?: return@launch
+                changed(moved)
+                screen = move.from
+                say("Moved to ${location?.name ?: "the Inbox"}")
+                contentsScreen()?.let { loadContents(it.locationId) }
+            } finally {
+                itemBusy = false
+            }
+        }
+    }
+
+    fun deleteItem() {
+        val current = item ?: return
+        if (itemBusy) return
+        viewModelScope.launch {
+            itemBusy = true
+            try {
+                online { app.api.delete(it, current.id) } ?: return@launch
+                results = results.filterNot { it.id == current.id }
+                contents = contents?.filterNot { it.id == current.id }
+                item = null
+                screen = (screen as? Screen.ItemDetail)?.from ?: home()
+                say("Deleted ${current.shownName}")
+            } finally {
+                itemBusy = false
+            }
+        }
+    }
+
+    // The location list on screen, or the one the open item was opened from.
+    private fun contentsScreen(): Screen.Contents? = when (val s = screen) {
+        is Screen.Contents -> s
+        is Screen.ItemDetail -> s.from as? Screen.Contents
+        else -> null
+    }
+
+    private fun edit(call: suspend (Session, PhoneItem) -> PhoneItem) {
+        val current = item ?: return
+        if (itemBusy) return
+        viewModelScope.launch {
+            itemBusy = true
+            try {
+                online { call(it, current) }?.let {
+                    changed(it)
+                    loadKeywords()
+                }
+            } finally {
+                itemBusy = false
+            }
+        }
+    }
+
+    // The item as the server has it now, wherever it's shown.
+    private fun changed(updated: PhoneItem) {
+        if (item?.id == updated.id) item = updated
+        results = results.map { if (it.id == updated.id) updated else it }
+        contents = contents?.map { if (it.id == updated.id) updated else it }
+    }
+
+    private suspend fun loadKeywords() {
+        val household = prefState.value?.householdId ?: return
+        online(quiet = true) { app.api.keywords(it, household) }?.let { keywords = it }
+    }
+
+    // Runs a find-mode call. Null when it failed: a server's refusal is said, no connection shows as offline.
+    private suspend fun <T> online(quiet: Boolean = false, call: suspend (Session) -> T): T? {
+        val session = prefs.session() ?: return null
+        return try {
+            call(session).also { offline = false }
+        } catch (e: ApiException) {
+            offline = false
+            if (!quiet) say(e.message ?: "The server answered with an error.")
+            null
+        } catch (e: IOException) {
+            Log.w(TAG, "Find mode call failed", e)
+            offline = true
+            null
+        }
+    }
+
+    // Photos for find mode, by item, version and size, kept while the mode is open.
+    private val photoCache = object : LruCache<String, ImageBitmap>(48 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
+    }
+
+    fun cachedPhoto(row: PhoneItem, thumb: Boolean): ImageBitmap? = photoCache.get(photoKey(row, thumb))
+
+    suspend fun loadPhoto(row: PhoneItem, thumb: Boolean): ImageBitmap? {
+        if (row.photoVersion == null) return null
+        val session = prefs.session() ?: return null
+        val key = photoKey(row, thumb)
+        photoCache.get(key)?.let { return it }
+        return try {
+            val bytes = app.api.photo(session, row.id, thumb)
+            withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+                ?.also { photoCache.put(key, it) }
+        } catch (_: IOException) {
+            null
+        }
+    }
+
+    private fun photoKey(row: PhoneItem, thumb: Boolean) = "${row.id}:${row.photoVersion}:$thumb"
+
+    // Here, after the fields it uses: another household means what find mode shows belongs to the old one.
+    init {
+        viewModelScope.launch {
+            householdId.collect {
+                photoCache.evictAll()
+                if (finding) {
+                    contents = null
+                    loadKeywords()
+                    if (screen is Screen.Contents || screen is Screen.ItemDetail || screen is Screen.Move) screen = Screen.Find
+                    if (query.isNotBlank()) runSearch()
+                }
+            }
+        }
     }
 
     // ----- Updates -----

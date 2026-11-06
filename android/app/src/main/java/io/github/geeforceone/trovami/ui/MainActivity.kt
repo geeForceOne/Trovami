@@ -67,6 +67,6 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         val uri = intent?.data?.toString() ?: return
-        model.openUri(uri)
+        model.openUri(uri, external = true)
     }
 }
