@@ -8,7 +8,7 @@
 
 - **Locations of any depth.** House → Floor → Room → Closet → Drawer, each with an icon, and optional notes, photo, color, short label and keywords.
 - **Find.** One search over item names, notes, keywords, location names and labels, at the top of every page.
-- **Android app for adding fast.** Scan an NFC tag or QR label, take a photo, done. It works offline in the cellar and syncs later. Without a tag, items land in the Inbox.
+- **Android app for adding fast, and finding.** Scan an NFC tag or QR label, take a photo, done. It works offline in the cellar and syncs later. Without a tag, items land in the Inbox. Its find mode searches your things, renames, moves or deletes them and edits their keywords; scan a tag there to see what's inside. Find mode needs the server.
 - **Inbox.** Give each new item its place from the web app, several at once if you like.
 - **Keywords.** Words Find also matches, from you, the AI or the location. Typing suggests the ones you already use, each can have a color, and pinned ones stay in the menu. New items get "new", and the AI marks what it isn't sure of with "unsure".
 - **AI naming.** An item added with just a photo gets its name and keywords from Claude or ChatGPT, using the household's own key. It's optional, and a name you typed is never overwritten. Each household picks the AI's language, and can translate what's already there in one go.
@@ -21,9 +21,9 @@
 | --- | --- | --- |
 | ![Search results with full paths](docs/screenshots/find.png) | ![The Inbox as a photo grid](docs/screenshots/inbox.png) | ![An item with its photo, keywords and location](docs/screenshots/item.png) |
 
-| Camera | Choosing a location |
-| --- | --- |
-| ![The phone app's camera screen](docs/screenshots/phone-camera.png) | ![The phone app's location list](docs/screenshots/phone-locations.png) |
+| Camera | Choosing a location | Find mode |
+| --- | --- | --- |
+| ![The phone app's camera screen](docs/screenshots/phone-camera.png) | ![The phone app's location list](docs/screenshots/phone-locations.png) | ![The phone app's find mode with search results](docs/screenshots/phone-find.png) |
 
 All names and pictures here are invented demo data.
 

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Nfc
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
@@ -77,7 +78,7 @@ fun LinkTagScreen(model: MainViewModel, screen: Screen.LinkTag) {
         title = if (screen.written) "Tag set up" else "New tag",
         subtitle = "Where does this tag go? It's linked to the location you pick.",
         onPick = { model.link(screen.code, it, screen.setup) },
-        onBack = { model.screen = if (screen.setup) Screen.SetUpTags else Screen.Camera },
+        onBack = model::back,
     )
 }
 
@@ -148,18 +149,19 @@ private fun SetUpHint(text: String) {
 }
 
 @Composable
-fun ScanQrScreen(model: MainViewModel) {
+fun ScanQrScreen(model: MainViewModel, screen: Screen.ScanQr) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         WithCameraPermission {
             QrScanner(Modifier.fillMaxSize()) { raw ->
-                model.screen = Screen.Camera
+                // Back first: the screen it returns to decides what the label does.
+                model.screen = screen.back
                 model.openUri(raw)
             }
         }
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White, shape = RoundedCornerShape(24.dp)) {
                 Row(Modifier.padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { model.screen = Screen.Camera }) {
+                    IconButton(onClick = { model.screen = screen.back }) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
                     }
                     Text("Point the camera at a Trovami label", style = MaterialTheme.typography.titleSmall)
@@ -167,6 +169,22 @@ fun ScanQrScreen(model: MainViewModel) {
             }
         }
     }
+}
+
+// The item's new location: hold its tag to the phone, scan its label, or pick it. No new
+// locations here; find mode leaves the tree alone.
+@Composable
+fun MoveScreen(model: MainViewModel, screen: Screen.Move) {
+    LocationPicker(
+        model = model,
+        title = "Move to…",
+        subtitle = "Hold the new location's tag to the phone, scan its label, or pick it.",
+        onPick = { model.moveTo(screen, it) },
+        onInbox = { model.moveTo(screen, null) },
+        onBack = model::back,
+        allowNew = false,
+        onScanQr = { model.screen = Screen.ScanQr(back = screen) },
+    )
 }
 
 // The household's locations as a tree, with a search box and inline "new location" rows.
@@ -178,6 +196,8 @@ private fun LocationPicker(
     onPick: (LocationRow) -> Unit,
     onInbox: (() -> Unit)? = null,
     onBack: () -> Unit = { model.screen = Screen.Camera },
+    allowNew: Boolean = true,
+    onScanQr: (() -> Unit)? = null,
 ) {
     val locations by model.locations.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
@@ -195,6 +215,7 @@ private fun LocationPicker(
         Row(Modifier.padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            if (onScanQr != null) IconButton(onClick = onScanQr) { Icon(Icons.Outlined.QrCodeScanner, contentDescription = "Scan a QR label") }
             IconButton(onClick = model::syncNow) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh locations") }
             HouseholdSwitcher(model)
         }
@@ -231,16 +252,16 @@ private fun LocationPicker(
                     HorizontalDivider()
                 }
             }
-            if (tree.isEmpty()) item { Hint("No locations yet. Add the first one below.") }
+            if (tree.isEmpty()) item { Hint(if (allowNew) "No locations yet. Add the first one below." else "No locations yet.") }
             items(tree, key = { it.first.id }) { (row, depth) ->
                 Column {
-                    LocationLine(row, depth, path = null, onPick = { onPick(row) }, onAdd = { addingUnder = row.id })
+                    LocationLine(row, depth, path = null, onPick = { onPick(row) }, onAdd = if (allowNew) ({ addingUnder = row.id }) else null)
                     if (addingUnder == row.id) {
                         NewLocation(model, parent = row, depth = depth + 1, onDone = { addingUnder = null }, onPick = onPick)
                     }
                 }
             }
-            item(key = "new-top") {
+            if (allowNew) item(key = "new-top") {
                 if (addingUnder == "") {
                     NewLocation(model, parent = null, depth = 0, onDone = { addingUnder = null }, onPick = onPick)
                 } else {
@@ -256,7 +277,7 @@ private fun LocationPicker(
 }
 
 @Composable
-private fun LocationLine(row: LocationRow, depth: Int, path: String?, onPick: () -> Unit, onAdd: (() -> Unit)?) {
+internal fun LocationLine(row: LocationRow, depth: Int, path: String?, onPick: () -> Unit, onAdd: (() -> Unit)?) {
     PickRow(onClick = onPick, depth = depth) {
         Icon(Kind.of(row.kind).icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(16.dp))
@@ -279,7 +300,7 @@ private fun LocationLine(row: LocationRow, depth: Int, path: String?, onPick: ()
 }
 
 @Composable
-private fun PickRow(onClick: () -> Unit, depth: Int = 0, content: @Composable RowScope.() -> Unit) {
+internal fun PickRow(onClick: () -> Unit, depth: Int = 0, content: @Composable RowScope.() -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(start = 16.dp + 20.dp * depth.coerceAtMost(8), end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -362,7 +383,7 @@ fun HouseholdSwitcher(model: MainViewModel) {
 }
 
 @Composable
-private fun Hint(text: String) {
+internal fun Hint(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.bodyMedium,

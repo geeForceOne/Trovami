@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.4.0 - 2026-11-06
+
+### New
+
+- The phone app has a find mode: search your items, open the Inbox or a location, and rename an item or edit its keywords. Scanning a tag or label in find mode shows what's stored there.
+- Delete an item from the phone.
+- Move an item on the phone by scanning the tag or label of where it goes.
+
 ## 1.3.1 - 2026-11-05
 
 ### New
