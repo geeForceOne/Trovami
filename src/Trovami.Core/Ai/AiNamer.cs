@@ -74,13 +74,17 @@ public static class AiNamer
             "Put the name alone on the first line, no punctuation at the end; if you can't tell what it is, write exactly UNKNOWN there. " +
             $"If you have a guess but aren't fairly sure what it is, write your best guess as the name and include the keyword \"{unsure}\". " +
             $"Never put the word {unsure} in the name itself: that word goes only in the keywords, and for nothing else. " +
-            "On the second line write \"Keywords:\" and up to 8 lowercase words or short phrases, separated by commas, " +
-            "that someone might search for: its colors, material, kind of thing and what it's for, and the brand if it's visible. " +
-            "For example: \"Keywords: blue, plastic, power tool, drilling, bosch\". Nothing else. " +
+            "On the second line write \"Keywords:\" and up to 5 lowercase words or short phrases, separated by commas, " +
+            "that someone might search for: its color, material, kind of thing and what it's for, and the brand if it's visible. " +
+            "For example: \"Keywords: blue, power tool, bosch\" for a cordless drill. Nothing else. " +
+            "Be choosy: a keyword earns its place only if someone would search for it to find this thing. " +
+            "The number is a limit, not a goal; fewer is better than filler, and none is fine. " +
+            "Leave out words already in the name (the name is searched too), words that fit anything in a home " +
+            "(such as item, thing, object, household, storage or useful), and anything the photo doesn't show. " +
             "Clothes, shoes, bags and other accessories need more, because people own many similar pieces. " +
             "Their name has up to 6 words and says what sets this piece apart: its color, pattern, cut or style, and type, " +
             "for example \"Red cable-knit crew-neck sweater\" or \"Navy striped linen midi dress\", never just \"Red pullover\". " +
-            "Their keywords go up to 14: the type and broader words for it (such as knitwear or top), colors, pattern, " +
+            "Their keywords go up to 10, picked the same way: the type and broader words for it (such as knitwear or top), colors, pattern, " +
             "fabric, neckline, sleeves, fit or length, season and occasion, and the brand and size if a label shows them. " +
             "Name a fabric only when the photo or a label makes it fairly clear. " +
             $"If the message lists keywords the household already uses, take those that are in {lang} wherever one fits, word for word, " +
@@ -92,8 +96,9 @@ public static class AiNamer
         return language.WritingRule is { } rule ? $"{text} {rule}" : text;
     }
 
-    // The household's keywords that go along with the photo; more would cost tokens on every photo.
-    public const int MaxKnownKeywords = 200;
+    // The household's keywords that go along with the photo, so the AI reuses them; the rarely used
+    // ones past this aren't seen and get near-doubles. More would cost tokens on every photo.
+    public const int MaxKnownKeywords = 500;
 
     // For a batch of translations, with room for the model's thinking.
     public const int MaxAnswerTokens = 12000;

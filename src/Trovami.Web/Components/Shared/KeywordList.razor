@@ -1,5 +1,10 @@
+@inherits AppPage
+@inject AiKeywordGrouper Grouper
+
 @* The right pane of the Locations page at /k: every keyword of the household, filtered as you
-   type. Picking one opens it, with its items and the tools to rename, merge or remove it. *@
+   type. Picking one opens it, with its items and the tools to rename, merge or remove it. The owner
+   can ask the AI for keywords to merge: each group is a card whose words can be left out, under a
+   name that's typed or taken from one of them with the star. The groups live only on this page. *@
 <a class="loc-back" href=""><Icon Name="left" Size="16" /> Inventory</a>
 
 <div class="page-head">
@@ -7,7 +12,85 @@
         <h1>Keywords</h1>
         <p class="page-sub">@Format.Count(Keywords.Count, "keyword", "keywords"). Pick one to see its items, to give it a color or pin it, or to rename, merge or remove it.</p>
     </div>
+    @if (CanGroup && _groups is null)
+    {
+        <button type="button" class="btn btn-secondary" disabled="@Busy" @onclick="FindAsync">
+            @if (_finding)
+            {
+                <BrandMark Size="18" Busy="true" /> <span>Looking…</span>
+            }
+            else
+            {
+                <Icon Name="merge" Size="16" /> <span>Find similar keywords</span>
+            }
+        </button>
+    }
 </div>
+
+@if (_finding)
+{
+    <p class="notice" role="status">The AI is reading through the keywords. With many of them this takes a minute.</p>
+}
+
+@if (_groups is not null)
+{
+    <section class="keyword-groups" aria-label="Similar keywords">
+        <div class="section-head">
+            <h2>Similar keywords</h2>
+            <div class="row-actions">
+                @if (_groups.Count > 1)
+                {
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@(Busy || !_groups.Any(CanMerge))" @onclick="MergeAllAsync">Merge all</button>
+                }
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="() => _groups = null">Close</button>
+            </div>
+        </div>
+        @if (_groups.Count == 0)
+        {
+            <p class="muted">@(_mergedAny ? "All merged." : "The AI found nothing to merge.")</p>
+        }
+        else
+        {
+            <p class="muted small">Click a keyword to leave it out, click it again to bring it back. The star makes a keyword the name the others merge into; you can also type one.</p>
+            <div class="keyword-group-list">
+                @foreach (var g in _groups)
+                {
+                    <div class="keyword-group" @key="g">
+                        <div class="keyword-group-words">
+                            @foreach (var w in g.Words)
+                            {
+                                var left = g.Left.Contains(w);
+                                var isName = w == g.CleanName;
+                                <span class="keyword-pick @(left ? "left" : "") @(isName ? "is-name" : "")" @key="w">
+                                    <button type="button" class="keyword-pick-word" aria-pressed="@(left ? "false" : "true")" disabled="@Busy"
+                                            title="@(left ? "Bring it back" : "Leave it out")" @onclick="() => Toggle(g, w)">
+                                        @w <span class="tree-count">@Format.Number(CountOf(w))</span>
+                                    </button>
+                                    <button type="button" class="keyword-pick-star" aria-pressed="@(isName ? "true" : "false")" disabled="@Busy"
+                                            title="Merge into &quot;@w&quot;" aria-label="Merge into @w" @onclick="() => MakeName(g, w)">
+                                        <Icon Name="star" Size="14" />
+                                    </button>
+                                </span>
+                            }
+                        </div>
+                        <div class="keyword-group-foot">
+                            <label class="keyword-group-name">
+                                <span class="muted small">Merge into</span>
+                                <input class="input" data-bwignore="true" autocomplete="off" spellcheck="false" maxlength="@Item.MaxKeywordLength"
+                                       @bind="g.Name" @bind:event="oninput" disabled="@Busy" aria-label="Name to merge into" />
+                            </label>
+                            <span class="tag tag-quiet" title="@(g.Related ? "Different words under a broader one: searching for the words merged away no longer finds these items." : "One word in different forms or languages, or synonyms.")">@(g.Related ? "Related words" : "Same word")</span>
+                            <div class="row-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" disabled="@(Busy || !CanMerge(g))" @onclick="() => MergeAsync(g)">Merge</button>
+                                <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="() => _groups.Remove(g)">Dismiss</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+}
 
 @if (Keywords.Count == 0)
 {
@@ -53,6 +136,114 @@ else
 
     private string _filter = "";
     private bool _byCount;
+    private List<Group>? _groups;
+    private bool _finding;
+    private bool _mergedAny;
+    private Guid? _groupsOf;
+
+    // A suggested group as the owner shapes it; Left: the words left out of the merge.
+    private sealed class Group(KeywordGroup suggested)
+    {
+        public string Name { get; set; } = suggested.Name;
+        public bool Related { get; } = suggested.Related;
+        public IReadOnlyList<string> Words { get; } = suggested.Words;
+        public HashSet<string> Left { get; } = [];
+
+        public string CleanName => ItemKeywords.Clean([Name]).FirstOrDefault() ?? "";
+        public IEnumerable<string> Kept => Words.Where(w => !Left.Contains(w));
+    }
+
+    private bool CanGroup => Household?.IsOwner == true && Keywords.Count(k => !ItemKeywords.IsStatus(k.Keyword)) >= 2;
+
+    protected override void OnParametersSet()
+    {
+        // Suggestions belong to the household they were made for.
+        if (_groupsOf != Household?.Id)
+        {
+            _groups = null;
+            _groupsOf = Household?.Id;
+        }
+    }
+
+    private int CountOf(string word) => Keywords.FirstOrDefault(k => k.Keyword == word)?.Items ?? 0;
+
+    // Something to do: a kept word that isn't the name already, under a name that can be a keyword.
+    private static bool CanMerge(Group g) =>
+        g.CleanName is { Length: > 0 } name && !ItemKeywords.IsStatus(name) && g.Kept.Any(w => w != name);
+
+    private static void Toggle(Group g, string word)
+    {
+        if (!g.Left.Remove(word))
+            g.Left.Add(word);
+    }
+
+    private static void MakeName(Group g, string word)
+    {
+        g.Name = word;
+        g.Left.Remove(word);
+    }
+
+    private async Task FindAsync()
+    {
+        if (Household is not { } h) return;
+        _finding = true;
+        _mergedAny = false;
+        try
+        {
+            await RunAsync(async () =>
+            {
+                var found = await Grouper.SuggestAsync(await UserIdAsync(), h.Id, PageToken);
+                _groups = found.Select(g => new Group(g)).ToList();
+                _groupsOf = h.Id;
+            });
+        }
+        finally
+        {
+            _finding = false;
+        }
+    }
+
+    private async Task MergeAsync(Group g)
+    {
+        if (await RunAsync(() => MergeOneAsync(g)))
+        {
+            Ui.Toast.Success($"Merged into \"{g.CleanName}\".");
+            await Ui.RefreshAsync();
+        }
+    }
+
+    private async Task MergeAllAsync()
+    {
+        var ready = _groups?.Where(CanMerge).ToList() ?? [];
+        if (ready.Count == 0) return;
+        var words = ready.Sum(g => g.Kept.Count(w => w != g.CleanName));
+        if (!await Ui.Confirm.AskAsync($"Merge {Format.Count(ready.Count, "group", "groups")}?",
+                $"{Format.Count(words, "keyword is", "keywords are")} replaced by their group's name on items and locations. This can't be undone.", "Merge all"))
+            return;
+        var merged = 0;
+        await RunAsync(async () =>
+        {
+            foreach (var g in ready)
+            {
+                await MergeOneAsync(g);
+                merged++;
+            }
+        });
+        if (merged > 0)
+        {
+            Ui.Toast.Success($"Merged {Format.Count(merged, "group", "groups")}.");
+            await Ui.RefreshAsync();
+        }
+    }
+
+    // The card goes away once its words are merged.
+    private async Task MergeOneAsync(Group g)
+    {
+        if (Household is not { } h) return;
+        await Grouper.MergeAsync(await UserIdAsync(), h.Id, g.Kept.ToList(), g.Name, PageToken);
+        _groups?.Remove(g);
+        _mergedAny = true;
+    }
 
     private List<KeywordCount> Shown()
     {

@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AiNamingQueue>();
         services.AddSingleton<AiNamingService>();
         services.AddSingleton<AiTranslationService>();
+        services.AddSingleton<AiKeywordGrouper>();
         services.AddSingleton<BackupService>();
         services.AddSingleton<Scheduler>();
         services.AddSingleton<AccountRequestService>();

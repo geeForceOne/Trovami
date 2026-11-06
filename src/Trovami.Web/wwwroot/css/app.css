@@ -1041,6 +1041,50 @@ td.num, th.num, .num.right { text-align: right; }
     color: var(--ink);
 }
 .keyword-link:hover { border-color: var(--accent); text-decoration: none; }
+
+/* The owner's AI suggestions on /k: one card per group of keywords to merge. */
+.keyword-groups { margin-bottom: 24px; }
+.keyword-groups h2 { margin: 0; font-size: var(--t-lg); }
+.keyword-group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; margin-top: 12px; }
+.keyword-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--r-md);
+    background: var(--sheet);
+}
+.keyword-group-words { display: flex; flex-wrap: wrap; gap: 8px; }
+.keyword-pick {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--r-md);
+    background: var(--sheet-2);
+}
+.keyword-pick button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+}
+.keyword-pick-word { padding: 4px 4px 4px 10px; }
+.keyword-pick-star { padding: 4px 8px 4px 4px; color: var(--pencil) !important; }
+.keyword-pick button:hover:not(:disabled) { color: var(--accent); }
+.keyword-pick.is-name { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.keyword-pick.is-name .keyword-pick-star { color: var(--accent) !important; }
+.keyword-pick.is-name .keyword-pick-star .icon { fill: currentColor; }
+.keyword-pick.left { border-style: dashed; background: transparent; }
+.keyword-pick.left .keyword-pick-word { color: var(--pencil); text-decoration: line-through; }
+.keyword-group-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.keyword-group-foot .row-actions { margin-left: auto; }
+.keyword-group-name { display: inline-flex; align-items: center; gap: 8px; flex: 1 1 200px; }
+.keyword-group-name .input { flex: 1; min-width: 0; }
 .loc-pane { min-width: 0; }
 .loc-back { display: none; align-items: center; gap: 6px; margin-bottom: 12px; font-size: var(--t-sm); }
 .new-loc-parent { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

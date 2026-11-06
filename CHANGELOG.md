@@ -1,5 +1,15 @@
 # Release notes
 
+## 1.6.0 - 2026-11-06
+
+### New
+
+- Household owners can have the AI find similar keywords on the Keywords page and merge them: leave words out, pick or type the name, then merge.
+
+### Improved
+
+- The AI adds fewer keywords to new items, only ones that help find them, and reuses more of the household's existing keywords.
+
 ## 1.5.0 - 2026-11-06
 
 ### New
