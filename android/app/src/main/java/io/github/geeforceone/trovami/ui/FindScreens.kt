@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.geeforceone.trovami.data.LocationRow
 import io.github.geeforceone.trovami.net.PhoneItem
 
 // Find mode: the other half of the app, for things already stored. Search, look into a location (by
@@ -93,6 +94,7 @@ fun FindScreen(model: MainViewModel) {
             .sortedBy { pathOf(it, locations).lowercase() }
             .take(20)
     }
+    val topLevel = remember(locations) { childrenOf(null, locations) }
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { if (model.query.isEmpty()) focus.requestFocus() }
@@ -127,13 +129,18 @@ fun FindScreen(model: MainViewModel) {
 
         LazyColumn(Modifier.fillMaxSize()) {
             if (query.isBlank()) {
+                // Browsing the tree starts at the top; the phone has it, so this works offline too.
+                if (topLevel.isNotEmpty()) item(key = "locations") { Section("Locations") }
+                items(topLevel, key = { "l-" + it.id }) { row ->
+                    LocationLine(row, depth = 0, path = null, onPick = { model.showContents(row.id) }, onAdd = null)
+                }
                 item(key = "inbox") {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
                     PickRow(onClick = { model.showContents(null) }) {
                         Icon(Icons.Outlined.Inbox, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                         Spacer(Modifier.width(16.dp))
                         Text("Inbox", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     }
-                    HorizontalDivider()
                 }
                 item(key = "hint") { Hint("Hold a tag to the phone, or scan a label, to see what's in that location.") }
                 return@LazyColumn
@@ -155,12 +162,14 @@ fun FindScreen(model: MainViewModel) {
     }
 }
 
-// What's in a location and the ones below it, or in the Inbox.
+// What's in a location: the locations right inside it to go into, then the items in it and below
+// it. Or the Inbox.
 @Composable
 fun ContentsScreen(model: MainViewModel, screen: Screen.Contents) {
     val locations by model.locations.collectAsStateWithLifecycle()
     val location = locations.firstOrNull { it.id == screen.locationId }
     val parent = location?.parentId?.let { id -> locations.firstOrNull { it.id == id } }
+    val inside = remember(locations, screen.locationId) { if (screen.locationId == null) emptyList() else childrenOf(screen.locationId, locations) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.padding(start = 4.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -172,9 +181,11 @@ fun ContentsScreen(model: MainViewModel, screen: Screen.Contents) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // The path up to here; tapping it goes up one level.
                 parent?.let {
                     Text(pathOf(it, locations), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.StartEllipsis)
+                        maxLines = 1, overflow = TextOverflow.StartEllipsis,
+                        modifier = Modifier.clickable(onClickLabel = "Go to ${it.name}") { model.showContents(it.id) })
                 }
             }
             if (location != null) {
@@ -183,13 +194,26 @@ fun ContentsScreen(model: MainViewModel, screen: Screen.Contents) {
         }
         OfflineBanner(model)
         val items = model.contents
-        when {
-            items == null -> if (!model.offline) {
-                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (inside.isNotEmpty()) {
+                item(key = "locations") { Section("Locations") }
+                items(inside, key = { "l-" + it.id }) { row ->
+                    LocationLine(row, depth = 0, path = null, onPick = { model.showContents(row.id) }, onAdd = null)
+                }
+                item(key = "items") { Section("Items") }
             }
-            items.isEmpty() -> Hint(if (screen.locationId == null) "The Inbox is empty." else "Nothing in here yet.")
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(items, key = { it.id }) { row ->
+            when {
+                items == null -> if (!model.offline) item(key = "loading") {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
+                items.isEmpty() -> item(key = "empty") {
+                    Hint(when {
+                        screen.locationId == null -> "The Inbox is empty."
+                        inside.isNotEmpty() -> "No items in here yet."
+                        else -> "Nothing in here yet."
+                    })
+                }
+                else -> items(items, key = { "i-" + it.id }) { row ->
                     // Only the ones in a location further down say where they are.
                     ItemLine(model, row, showPath = row.locationId != screen.locationId) { model.openItem(row) }
                 }
@@ -445,4 +469,11 @@ private fun keywordColor(key: String): Color? = when (key) {
     "black" -> Color(0xFF3D3647)
     "white" -> Color(0xFFE9ECEA)
     else -> null
+}
+
+// The locations right inside a parent (null: the top ones, and those whose parent isn't known yet), by name.
+private fun childrenOf(parentId: String?, all: List<LocationRow>): List<LocationRow> {
+    val ids = if (parentId == null) all.mapTo(HashSet()) { it.id } else emptySet()
+    return all.filter { if (parentId == null) it.parentId == null || it.parentId !in ids else it.parentId == parentId }
+        .sortedBy { it.name.lowercase() }
 }

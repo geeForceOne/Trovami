@@ -76,8 +76,9 @@ sealed interface Screen {
 
     data object Find : Screen
 
-    // The items in a location and below it; null: the Inbox.
-    data class Contents(val locationId: String?) : Screen
+    // The locations right inside a location and the items in it and below it; null: the Inbox.
+    // from: where Back goes, the location browsed from or Find.
+    data class Contents(val locationId: String?, val from: Screen = Find) : Screen
 
     data class ItemDetail(val id: String, val from: Screen) : Screen
 
@@ -459,7 +460,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is Screen.ScanQr -> s.back
             is Screen.ItemDetail -> s.from
             is Screen.Move -> s.from
-            is Screen.Contents -> Screen.Find
+            is Screen.Contents -> {
+                (s.from as? Screen.Contents)?.let(::openContents) ?: run { screen = Screen.Find }
+                return
+            }
             Screen.Find -> {
                 leaveFind()
                 return
@@ -497,10 +501,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun showContents(locationId: String?) {
+    // Browsing from one location into another keeps the way back; anything else goes back to Find.
+    fun showContents(locationId: String?) = openContents(Screen.Contents(locationId, from = screen as? Screen.Contents ?: Screen.Find))
+
+    private fun openContents(target: Screen.Contents) {
         contents = null
-        screen = Screen.Contents(locationId)
-        viewModelScope.launch { loadContents(locationId) }
+        screen = target
+        viewModelScope.launch { loadContents(target.locationId) }
     }
 
     private suspend fun loadContents(locationId: String?) {

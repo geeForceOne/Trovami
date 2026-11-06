@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.5.0 - 2026-11-06
+
+### New
+
+- Browse your locations in the phone's find mode: start from the top, go into a location to see the locations inside it and everything stored there.
+
 ## 1.4.0 - 2026-11-06
 
 ### New
