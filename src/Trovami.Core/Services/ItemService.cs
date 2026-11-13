@@ -185,15 +185,46 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var item = await LoadAsync(db, userId, id, ct);
+        if (EditKeywords(item, keywords, DateTime.UtcNow))
+            await db.SaveChangesAsync(ct);
+    }
+
+    // Adds a keyword to several items at once, or takes it off them (multi-select in the lists). A
+    // person's edit, the same as typing it on each item. Returns how many items changed: an item that
+    // already has it (or doesn't), or has no room for another keyword, stays as it is.
+    public async Task<int> SetKeywordOnItemsAsync(string userId, IReadOnlyCollection<Guid> ids, string keyword, bool on, CancellationToken ct = default)
+    {
+        var word = ItemKeywords.Clean([keyword]).FirstOrDefault();
+        if (ids.Count == 0 || word is null)
+            return 0;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var items = await db.Items.Where(i => ids.Contains(i.Id)).ToListAsync(ct);
+        foreach (var householdId in items.Select(i => i.HouseholdId).Distinct())
+            await Access.RequireMemberAsync(db, userId, householdId, ct);
+        var now = DateTime.UtcNow;
+        var changed = 0;
+        foreach (var item in items)
+        {
+            var words = ItemKeywords.Split(item.Keywords);
+            if (EditKeywords(item, on ? words.Append(word) : words.Where(k => k != word), now))
+                changed++;
+        }
+        await db.SaveChangesAsync(ct);
+        return changed;
+    }
+
+    // A person's change of an item's keywords; false when it comes out the same.
+    private static bool EditKeywords(Item item, IEnumerable<string> keywords, DateTime now)
+    {
         var joined = ItemKeywords.Join(keywords);
         if (joined == (item.Keywords ?? ""))
-            return;
+            return false;
         item.KeywordsFinal |= !ItemKeywords.DifferOnlyInNew(item.Keywords, joined);
         item.Keywords = joined;
         if (item.AiNaming == AiNaming.Pending && !AiNamingService.NeedsAi(item))
             item.AiNaming = AiNaming.NotNeeded;
-        item.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        item.UpdatedAt = now;
+        return true;
     }
 
     public async Task RenameAsync(string userId, Guid id, string? name, CancellationToken ct = default)

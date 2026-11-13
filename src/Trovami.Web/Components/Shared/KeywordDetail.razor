@@ -1,5 +1,6 @@
 @inherits AppPage
 @inject ItemService Items
+@inject IJSRuntime JS
 
 @* The right pane of the Locations page for a keyword: the items that have it, from anywhere, with all
    their keywords to take off right there, its color and pin, and ways to tidy it up across all of them.
@@ -65,7 +66,13 @@ else if (_items.Count == 0)
 }
 else
 {
-    <ItemTable Items="_items" Tree="Tree" LocationId="null" RemoveKeyword="RemoveFromItemAsync" Scope="@Keyword" />
+    <div class="keyword-view">
+        <div class="segmented" role="radiogroup" aria-label="Show items as">
+            <button type="button" role="radio" class="@(_table ? "" : "on")" aria-checked="@(_table ? "false" : "true")" @onclick="() => SetViewAsync(table: false)"><Icon Name="image" Size="16" /> Photos</button>
+            <button type="button" role="radio" class="@(_table ? "on" : "")" aria-checked="@(_table ? "true" : "false")" @onclick="() => SetViewAsync(table: true)"><Icon Name="list" Size="16" /> Table</button>
+        </div>
+    </div>
+    <ItemTable Items="_items" Tree="Tree" LocationId="null" Photos="!_table" BulkKeywords="true" RemoveKeyword="RemoveFromItemAsync" Scope="@Keyword" />
 }
 
 @code {
@@ -73,8 +80,12 @@ else
     [Parameter, EditorRequired] public LocationTree Tree { get; set; } = default!;
     [Parameter, EditorRequired] public IReadOnlyList<KeywordCount> Keywords { get; set; } = [];
 
+    private const string ViewPref = "keywordView";
+
     private IReadOnlyList<ItemView> _items = [];
     private bool _loaded;
+    // The table (with each item's keywords to take off) unless Photos was picked, remembered per browser.
+    private bool _table = true;
     private bool _merging;
     private string? _shown;
 
@@ -89,6 +100,22 @@ else
             _merging = false;
         }
         await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && await JS.InvokeAsync<string?>("trovami.getPref", ViewPref) == "photos")
+        {
+            _table = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetViewAsync(bool table)
+    {
+        if (_table == table) return;
+        _table = table;
+        await JS.InvokeVoidAsync("trovami.setPref", ViewPref, table ? "table" : "photos");
     }
 
     private async Task LoadAsync()

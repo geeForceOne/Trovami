@@ -4,7 +4,7 @@
 @* A location's items, everything in it and below it, as a table or (Photos) as photo cards:
    filtered as you type, sorted by the table's columns. "Where" is the path below the location,
    empty for what's directly in it; the cards show it under the name. Several can be selected to move
-   or delete them; only what the filter shows counts, so nothing hidden gets moved or deleted. *@
+   or delete them (and on a keyword's list, to add or remove a keyword); only what the filter shows counts, so nothing hidden gets moved or deleted. *@
 @{
     var shown = Rows();
     var picked = shown.Where(x => _selected.Contains(x.Item.Id)).Select(x => x.Item.Id).ToList();
@@ -30,6 +30,10 @@
         @if (picked.Count > 0)
         {
             <LocationPicker Tree="Tree" AllowInbox="true" Placeholder="@($"Move {Format.Count(picked.Count, "item", "items")} to…")" OnPick="id => MoveAsync(picked, id)" />
+            @if (BulkKeywords)
+            {
+                <BulkKeywords Items="shown.Where(x => _selected.Contains(x.Item.Id)).Select(x => x.Item).ToList()" />
+            }
             <button type="button" class="btn btn-ghost btn-sm btn-danger-text" disabled="@Busy" @onclick="() => DeleteAsync(picked)"><Icon Name="trash" Size="16" /> Delete</button>
         }
     </div>
@@ -40,7 +44,7 @@
     <div class="item-grid">
         @foreach (var (item, where) in shown)
         {
-            <ItemCard @key="item.Id" Item="item" PathText="@where" Selected="_selected.Contains(item.Id)" OnSelect="on => Select(item.Id, on)" />
+            <ItemCard @key="item.Id" Item="item" PathText="@where" ShowKeywords="RemoveKeyword is not null" Selected="_selected.Contains(item.Id)" OnSelect="on => Select(item.Id, on)" />
         }
     </div>
 }
@@ -120,6 +124,9 @@ else if (Items.Count > 0)
 
     // Set: the table also shows each item's keywords, whose x calls this.
     [Parameter] public Func<ItemView, string, Task>? RemoveKeyword { get; set; }
+
+    // The bulk bar also adds and removes keywords on the selected items (a keyword's list).
+    [Parameter] public bool BulkKeywords { get; set; }
 
     // What the list is of; the selection starts over when it changes.
     [Parameter] public string? Scope { get; set; }

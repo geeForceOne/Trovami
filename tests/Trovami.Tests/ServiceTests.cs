@@ -347,6 +347,30 @@ public class ServiceTests
     }
 
     [Fact]
+    public async Task AKeywordIsAddedToAndTakenOffSeveralItemsAtOnce()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(a, null, "A", null));
+        await t.Items.CreateAsync(anna, home, new ItemCreate(b, null, "B", null));
+        await t.Items.SetKeywordsAsync(anna, b, ["xmas"]);
+
+        Assert.Equal(1, await t.Items.SetKeywordOnItemsAsync(anna, [a, b], " Xmas", on: true));
+        Assert.Equal(["xmas"], Described(await t.Items.GetAsync(anna, a)));
+        Assert.Equal(["xmas"], Described(await t.Items.GetAsync(anna, b)));
+
+        Assert.Equal(2, await t.Items.SetKeywordOnItemsAsync(anna, [a, b], "xmas", on: false));
+        Assert.Empty(Described(await t.Items.GetAsync(anna, a)));
+        Assert.Equal(0, await t.Items.SetKeywordOnItemsAsync(anna, [a, b], "xmas", on: false));
+
+        var bob = await t.AddUserAsync("bob");
+        await Assert.ThrowsAnyAsync<Exception>(() => t.Items.SetKeywordOnItemsAsync(bob, [a], "mine", on: true));
+    }
+
+    [Fact]
     public async Task TheAiIsNotShownTheUnsureKeywordAsOneToReuse()
     {
         using var t = new TestDb();
