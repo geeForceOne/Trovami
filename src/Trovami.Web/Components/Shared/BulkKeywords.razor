@@ -1,0 +1,135 @@
+@inherits AppPage
+@inject ItemService ItemActions
+
+@* In a list's bulk bar: adds a keyword to the selected items, or takes one off them. Adding is a field
+   that offers the household's keywords as you type, and Enter adds it; removing picks one of the
+   keywords the selected items have (with how many have it, typing filters them) with Enter or a click.
+   Afterwards the page reloads (Ui.RefreshAsync), which also updates the menu's keywords. *@
+<div class="bulk-keywords">
+    <input data-bwignore="true" class="input bulk-keyword-add" list="@ListId" autocomplete="off" spellcheck="false" maxlength="@Item.MaxKeywordLength"
+           placeholder="Add keyword…" aria-label="@($"Add a keyword to {Format.Count(Items.Count, "item", "items")}")" disabled="@Busy"
+           @bind="_typed" @bind:event="oninput" @onfocus="LoadSuggestionsAsync" @onkeydown="OnKeyDownAsync" />
+    <datalist id="@ListId">
+        @foreach (var k in _known)
+        {
+            <option value="@k.Keyword"></option>
+        }
+    </datalist>
+    @if (OnItems().Count > 0)
+    {
+        @* Like the location picker, not a <select>: a select changes on the arrow keys while it's closed,
+           which would remove a keyword before one was picked. Here only Enter or a click removes. *@
+        var shown = Removable();
+        <div class="picker bulk-keyword-remove @(_removing ? "open" : "")">
+            <input data-bwignore="true" class="input picker-input" placeholder="Remove keyword…" autocomplete="off" spellcheck="false" disabled="@Busy"
+                   role="combobox" aria-expanded="@(_removing ? "true" : "false")" aria-label="@($"Remove a keyword from {Format.Count(Items.Count, "item", "items")}")"
+                   @bind="_removeText" @bind:event="oninput" @bind:after="() => { _removing = true; _active = 0; }"
+                   @onfocus="() => _removing = true" @onblur="CloseRemove" @onkeydown="OnRemoveKeyAsync" />
+            @if (_removing)
+            {
+                <div class="menu-scrim" @onclick="CloseRemove"></div>
+                <ul class="picker-list" role="listbox">
+                    @for (var i = 0; i < shown.Count; i++)
+                    {
+                        var (word, count) = shown[i];
+                        var index = i;
+                        <li role="option" aria-selected="@(index == _active ? "true" : "false")" class="@(index == _active ? "active" : "")"
+                            @onmousedown="() => RemoveAsync(word)" @onmousedown:preventDefault="true" @onmouseover="() => _active = index">
+                            <Icon Name="tag" Size="16" />
+                            <span class="picker-name">@word</span>
+                            @if (count < Items.Count)
+                            {
+                                <span class="picker-path">@($"on {Format.Number(count)} of {Format.Count(Items.Count, "item", "items")}")</span>
+                            }
+                        </li>
+                    }
+                    @if (shown.Count == 0)
+                    {
+                        <li class="picker-none">No keyword matches.</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    // The selected items.
+    [Parameter, EditorRequired] public IReadOnlyList<ItemView> Items { get; set; } = [];
+
+    private static int _lists;
+    private readonly string ListId = $"bulk-keywords-{Interlocked.Increment(ref _lists)}";
+    private string _typed = "";
+    private string _removeText = "";
+    private bool _removing;
+    private int _active;
+    private IReadOnlyList<KeywordCount> _known = [];
+
+    // The keywords on the selected items, those most of them have first.
+    private List<(string Word, int Count)> OnItems() => Items
+        .SelectMany(i => i.Keywords).GroupBy(k => k)
+        .Select(g => (Word: g.Key, Count: g.Count()))
+        .OrderByDescending(x => x.Count).ThenBy(x => x.Word, StringComparer.CurrentCultureIgnoreCase)
+        .ToList();
+
+    // Read each time, as keywords change on other pages and devices.
+    private async Task LoadSuggestionsAsync()
+    {
+        if (Household is { } household)
+            await TryAsync(async () => _known = await ItemActions.KeywordSuggestionsAsync(await UserIdAsync(), household.Id, PageToken));
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && ItemKeywords.Clean([_typed]).FirstOrDefault() is { } word)
+        {
+            _typed = "";
+            await ApplyAsync(word, on: true);
+        }
+    }
+
+    // The keywords on the selected items that fit what's typed in the remove field.
+    private List<(string Word, int Count)> Removable()
+    {
+        var words = Search.Words(_removeText);
+        return OnItems().Where(x => words.All(Search.Normalize(x.Word).Contains)).ToList();
+    }
+
+    private async Task OnRemoveKeyAsync(KeyboardEventArgs e)
+    {
+        var shown = Removable();
+        switch (e.Key)
+        {
+            case "ArrowDown": _active = _removing ? Math.Min(_active + 1, shown.Count - 1) : 0; _removing = true; break;
+            case "ArrowUp": _active = Math.Max(_active - 1, 0); break;
+            case "Escape": CloseRemove(); break;
+            case "Enter" when _removing && _active >= 0 && _active < shown.Count: await RemoveAsync(shown[_active].Word); break;
+        }
+    }
+
+    private void CloseRemove()
+    {
+        _removing = false;
+        _removeText = "";
+        _active = 0;
+    }
+
+    private async Task RemoveAsync(string word)
+    {
+        CloseRemove();
+        await ApplyAsync(word, on: false);
+    }
+
+    private async Task ApplyAsync(string word, bool on)
+    {
+        var ids = Items.Select(i => i.Id).ToList();
+        var changed = 0;
+        if (!await RunAsync(async () => changed = await ItemActions.SetKeywordOnItemsAsync(await UserIdAsync(), ids, word, on, PageToken)))
+            return;
+        var done = on ? $"Added \"{word}\" to {Format.Count(changed, "item", "items")}." : $"Took \"{word}\" off {Format.Count(changed, "item", "items")}.";
+        if (on && changed < ids.Count)
+            done += " The others already had it or had no room for more.";
+        Ui.Toast.Success(done);
+        await Ui.RefreshAsync();
+    }
+}

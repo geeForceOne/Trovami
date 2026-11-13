@@ -1,10 +1,10 @@
 @* Picks a location, inline: a text field with a list below it. Empty, the list is the location
    tree to open and close; typing turns it into the matches with their paths. Arrow keys move
-   (right and left open and close a branch), Enter chooses, Escape closes. Used wherever
-   something moves. *@
+   (right and left open and close a branch), Enter chooses, Escape or leaving the field closes
+   (clicks in the list keep the focus in the field). Used wherever something moves. *@
 <div class="picker @(_open ? "open" : "")">
     <input data-bwignore="true" class="input picker-input" placeholder="@Placeholder" aria-label="@Placeholder" autocomplete="off" spellcheck="false"
-           @bind="_text" @bind:event="oninput" @bind:after="Filter" @onfocus="Open" @onkeydown="OnKeyAsync" @ref="_input" />
+           @bind="_text" @bind:event="oninput" @bind:after="Filter" @onfocus="Open" @onblur="Close" @onkeydown="OnKeyAsync" @ref="_input" />
     @if (_open)
     {
         <div class="menu-scrim" @onclick="Close"></div>

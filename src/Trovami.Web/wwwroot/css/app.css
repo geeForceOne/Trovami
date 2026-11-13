@@ -610,7 +610,7 @@ td.num, th.num, .num.right { text-align: right; }
 
 /* A location's items as a table (LocationDetail's Table view). */
 .item-table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 14px 0 6px; }
-.item-filter { flex: 0 1 280px; min-width: 0; }
+.item-filter { flex: 1 1 280px; min-width: 0; }
 .item-table td { vertical-align: middle; }
 .item-table-photo { width: 52px; }
 .item-table-photo img, .item-table-nophoto { display: grid; place-items: center; width: 40px; height: 40px; object-fit: cover; border-radius: var(--r-sm); background: var(--sheet-2); color: var(--pencil); }
@@ -1166,6 +1166,9 @@ td.num, th.num, .num.right { text-align: right; }
 }
 .bulk-bar.active { border-color: var(--rule-strong); box-shadow: var(--lift-sm); }
 .bulk-bar .picker { flex: 1 1 240px; }
+.bulk-keywords { display: flex; flex-wrap: wrap; gap: 8px 10px; flex: 1 1 320px; }
+.bulk-keywords > .input, .bulk-keywords > .picker { flex: 1 1 150px; width: auto; min-width: 0; }
+.keyword-view { display: flex; justify-content: flex-end; margin: 0 0 12px; }
 .labels-bar .btn-primary { margin-left: auto; }
 .btn.disabled { opacity: 0.5; pointer-events: none; }
 
