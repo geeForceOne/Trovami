@@ -71,6 +71,7 @@ else
                 @if (_item.PhotoVersion is not null)
                 {
                     <button type="button" class="btn btn-ghost btn-sm" data-crop-start disabled="@Busy" @onclick="StartCrop">Crop photo (Ctrl+C)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" title="A quarter turn clockwise" @onclick="RotatePhotoAsync">Rotate photo</button>
                     <button type="button" class="btn btn-ghost btn-sm" disabled="@Busy" @onclick="RemovePhotoAsync">Remove photo</button>
                 }
             </div>
@@ -292,6 +293,12 @@ else
         }))
             _cropping = false;
     }
+
+    private Task RotatePhotoAsync() => RunAsync(async () =>
+    {
+        await Items.RotatePhotoAsync(await UserIdAsync(), Id, PageToken);
+        await LoadAsync();
+    });
 
     private async Task RemovePhotoAsync()
     {

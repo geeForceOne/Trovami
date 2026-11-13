@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.8.0 - 2026-11-13
+
+### New
+
+- Rotate an item's photo a quarter turn with Rotate photo on its page.
+
 ## 1.7.0 - 2026-11-13
 
 ### New
