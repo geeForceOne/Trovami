@@ -7,15 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="13.6.0" />
+    <PackageReference Include="Anthropic" Version="13.8.0" />
     <PackageReference Include="MailKit" Version="4.18.2" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.14" />
-    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.14" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.15" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.15" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
     <!-- Photos: decoding, turning upright, shrinking. The NoDependencies native build runs in the
          plain Linux container without fontconfig. -->
-    <PackageReference Include="SkiaSharp" Version="4.154.0" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />
+    <PackageReference Include="SkiaSharp" Version="4.156.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.156.0" />
   </ItemGroup>
 
   <ItemGroup>

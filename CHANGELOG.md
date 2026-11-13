@@ -1,5 +1,16 @@
 # Release notes
 
+## 1.7.0 - 2026-11-13
+
+### New
+
+- Add a keyword to many items at once, or take one off: select them in the Inbox or on a keyword's page.
+- A keyword's page can show its items as photos, like a location's.
+
+### Improved
+
+- Minor fixes and updates.
+
 ## 1.6.0 - 2026-11-06
 
 ### New
