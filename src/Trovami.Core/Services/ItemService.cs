@@ -312,6 +312,18 @@ public sealed class ItemService(IDbContextFactory<AppDbContext> dbFactory, Photo
             naming.Enqueue(item.Id);
     }
 
+    // A quarter turn clockwise per call, replacing the stored photo (like cropping).
+    public async Task RotatePhotoAsync(string userId, Guid id, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var item = await LoadAsync(db, userId, id, ct);
+        if (item.PhotoVersion is null)
+            throw new InputException("This item has no photo to rotate.");
+        item.PhotoVersion = await photos.RotateAsync(item.HouseholdId, id, ct);
+        item.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task RemovePhotoAsync(string userId, Guid id, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -596,8 +608,14 @@ public static class ItemKeywords
             .Distinct()
             // These two say something about the item's state, so they neither use up the limit nor fall to it.
             .Where(w => IsStatus(w) || counted++ < Item.MaxKeywords)
+            .OrderBy(Rank)
             .ToList();
     }
+
+    // "new" first, then "unsure", then the rest in their own order (OrderBy is stable). Keywords
+    // arrive in many orders (the AI writes "unsure" anywhere in its line), so both writing and
+    // reading sort them, which also shows items stored before this in the right order.
+    private static int Rank(string word) => AiLanguages.IsNew(word) ? 0 : IsStatus(word) ? 1 : 2;
 
     // Set by the app rather than describing the thing, so the AI isn't offered them to reuse.
     public static bool IsStatus(string word) => AiLanguages.IsStatus(word);
@@ -607,7 +625,7 @@ public static class ItemKeywords
         Split(stored).Where(k => !AiLanguages.IsNew(k)).SequenceEqual(Split(other).Where(k => !AiLanguages.IsNew(k)));
 
     public static IReadOnlyList<string> Split(string? stored) =>
-        string.IsNullOrEmpty(stored) ? [] : stored.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+        string.IsNullOrEmpty(stored) ? [] : stored.Split(", ", StringSplitOptions.RemoveEmptyEntries).OrderBy(Rank).ToList();
 
     public static string Join(IEnumerable<string> words) => string.Join(", ", Clean(words));
 

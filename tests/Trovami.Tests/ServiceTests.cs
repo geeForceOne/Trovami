@@ -420,7 +420,12 @@ public class ServiceTests
 
         var guess = AiNamer.ParseReply("Old radio\nKeywords: brown, unsure");
         Assert.Equal("Old radio", guess.Name);
-        Assert.Contains(AiNamer.UnsureKeyword, guess.Keywords);
+        Assert.Equal([AiNamer.UnsureKeyword, "brown"], guess.Keywords);
+
+        // Merged after what an item already has, "unsure" still comes right after "new", and items
+        // stored the old way read in that order too.
+        Assert.Equal("new, unsure, tools, brown", ItemKeywords.Merge("new, tools", ["brown", "unsure"]));
+        Assert.Equal(["neu", "unsicher", "blau", "alt"], ItemKeywords.Split("blau, unsicher, alt, neu"));
 
         Assert.Empty(AiNamer.ParseReply("Passport").Keywords);
     }
@@ -788,8 +793,8 @@ public class ServiceTests
 
         Assert.Equal(Item.MaxKeywords + 2, kept.Count);
         Assert.Equal(ItemKeywords.New, kept[0]);
-        Assert.Equal($"word{Item.MaxKeywords}", kept[^2]);
-        Assert.Equal(AiNamer.UnsureKeyword, kept[^1]);
+        Assert.Equal(AiNamer.UnsureKeyword, kept[1]);
+        Assert.Equal($"word{Item.MaxKeywords}", kept[^1]);
     }
 
     [Theory]

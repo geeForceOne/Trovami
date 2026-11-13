@@ -333,6 +333,25 @@ public class LanguageTests
         Assert.Equal((400, 300), (photo.Width, photo.Height));
     }
 
+    [Fact]
+    public async Task RotatingAnItemsPhotoGivesItANewVersion()
+    {
+        using var t = new TestDb();
+        var anna = await t.AddUserAsync("anna");
+        var home = await t.Households.CreateAsync(anna, "Home");
+        var item = Guid.NewGuid();
+        await t.Items.CreateAsync(anna, home, new ItemCreate(item, null, "Lamp", null));
+        await Assert.ThrowsAsync<InputException>(() => t.Items.RotatePhotoAsync(anna, item));
+        await t.Items.SetPhotoAsync(anna, item, new MemoryStream(PhotoTests.Jpeg(800, 600)));
+        var before = (await t.Items.GetAsync(anna, item)).PhotoVersion;
+
+        await t.Items.RotatePhotoAsync(anna, item);
+
+        Assert.NotEqual(before, (await t.Items.GetAsync(anna, item)).PhotoVersion);
+        using var photo = SKBitmap.Decode(await t.Photos.ReadAsync(home, item));
+        Assert.Equal((600, 800), (photo.Width, photo.Height));
+    }
+
     private static async Task<(string Anna, Guid Home, AiTranslationService Translation)> SetUpAsync(TestDb t, IReadOnlyDictionary<string, string> translations)
     {
         var anna = await t.AddUserAsync("anna");

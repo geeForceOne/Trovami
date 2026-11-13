@@ -62,6 +62,31 @@ public sealed class PhotoStore(StoragePaths paths)
         return (Encode(part, MaxSide), Encode(part, ThumbSide));
     }
 
+    // Turns the stored photo a quarter turn clockwise and replaces it. Returns the new version.
+    public async Task<string> RotateAsync(Guid householdId, Guid id, CancellationToken ct = default)
+    {
+        var bytes = await ReadAsync(householdId, id, ct) ?? throw new NotFoundException("This item has no photo to rotate.");
+        var (full, thumb) = Rotate(bytes);
+        var dir = Path.Combine(paths.PhotosPath, householdId.ToString("N"));
+        await WriteAtomicAsync(Path.Combine(dir, FileName(id, PhotoSize.Full)), full, ct);
+        await WriteAtomicAsync(Path.Combine(dir, FileName(id, PhotoSize.Thumb)), thumb, ct);
+        return Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
+    }
+
+    internal static (byte[] Full, byte[] Thumb) Rotate(byte[] jpeg)
+    {
+        using var source = SKBitmap.Decode(jpeg) ?? throw new InputException("That photo couldn't be read.");
+        using var turned = new SKBitmap(source.Height, source.Width, source.ColorType, source.AlphaType);
+        using (var canvas = new SKCanvas(turned))
+        using (var image = SKImage.FromBitmap(source))
+        {
+            canvas.Translate(turned.Width, 0);
+            canvas.RotateDegrees(90);
+            canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKFilterMode.Nearest));
+        }
+        return (Encode(turned, MaxSide), Encode(turned, ThumbSide));
+    }
+
     // The file of a photo, or null when there's none.
     public string? PathOf(Guid householdId, Guid id, PhotoSize size)
     {
